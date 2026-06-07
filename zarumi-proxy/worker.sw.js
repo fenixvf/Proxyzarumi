@@ -19,16 +19,16 @@ const SOURCES = [
   {
     name:      "animesdrive",
     base:      "https://animesdrive.online/episodio",
-    extractor: "https://zarumi-drivea.SEU-USUARIO.workers.dev",
+    extractor: "https://zarumi-drivea.zarumi.workers.dev",
   },
   {
     name:      "animeq",
     base:      "https://animeq.net/episodio",
-    extractor: "https://zarumi-aq.SEU-USUARIO.workers.dev",
+    extractor: "https://zarumi-aq.zarumi.workers.dev",
   },
 ];
 
-const ANITUBE_EXTRACTOR = "https://zarumi-at.SEU-USUARIO.workers.dev";
+const ANITUBE_EXTRACTOR = "https://zarumi-at.zarumi.workers.dev";
 
 addEventListener("fetch", (event) => {
   event.respondWith(handleRequest(event.request));
