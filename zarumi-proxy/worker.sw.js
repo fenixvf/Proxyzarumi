@@ -39,6 +39,7 @@ async function handleRequest(request) {
   if (path === "/cache/clear")     return handleCacheClear(url.searchParams);
   if (path === "/override")        return handleOverride(url.searchParams, request);
   if (path === "/override/delete") return handleOverrideDelete(url.searchParams);
+  if (path === "/debug")           return handleDebug(url.searchParams);
 
   return corsResponse(JSON.stringify({ error: "Not found" }), 404);
 }
@@ -179,6 +180,37 @@ async function handleOverrideDelete(params) {
 
   await kvDelete(`override:${mal_id}`);
   return corsResponse(JSON.stringify({ deleted: `override:${mal_id}` }), 200);
+}
+
+// ─── /debug ──────────────────────────────────────────────────────────────────
+// GET /debug?url=https://animesdrive.online/episodio/rezero-...
+
+async function handleDebug(params) {
+  const pageUrl = params.get("url");
+  if (!pageUrl) return corsResponse(JSON.stringify({ error: "Missing url" }), 400);
+
+  let html;
+  try {
+    html = await fetchPage(pageUrl);
+  } catch (err) {
+    return corsResponse(JSON.stringify({ error: err.message }), 502);
+  }
+
+  const len = html.length;
+
+  const patterns = {
+    source_tag:  (html.match(/<source[^>]+src=["'][^"']+/gi) || []).slice(0, 5),
+    file_attr:   (html.match(/file\s*:\s*["'][^"']{10,}/gi) || []).slice(0, 5),
+    json_src:    (html.match(/"src"\s*:\s*"[^"]{10,}"/gi) || []).slice(0, 5),
+    iframe_src:  (html.match(/<iframe[^>]+src=["'][^"']+/gi) || []).slice(0, 5),
+    mp4_urls:    (html.match(/https?:\/\/[^\s"'<>]+\.mp4[^\s"'<>]*/gi) || []).slice(0, 5),
+    jwplayer:    (html.match(/jwplayer[^;]{0,200}/gi) || []).slice(0, 3),
+    playerjs:    (html.match(/playerjs[^;]{0,200}/gi) || []).slice(0, 3),
+    video_tag:   (html.match(/<video[^>]*>[^<]{0,200}/gi) || []).slice(0, 3),
+    setup_call:  (html.match(/setup\s*\(\s*\{[^}]{0,300}/gi) || []).slice(0, 3),
+  };
+
+  return corsResponse(JSON.stringify({ url: pageUrl, html_length: len, patterns }, null, 2), 200);
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
