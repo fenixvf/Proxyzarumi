@@ -208,6 +208,14 @@ async function handleDebug(params) {
     playerjs:    (html.match(/playerjs[^;]{0,200}/gi) || []).slice(0, 3),
     video_tag:   (html.match(/<video[^>]*>[^<]{0,200}/gi) || []).slice(0, 3),
     setup_call:  (html.match(/setup\s*\(\s*\{[^}]{0,300}/gi) || []).slice(0, 3),
+    // DooPlay específico
+    data_post:   (html.match(/data-post=["']\d+["']/gi) || []).slice(0, 5),
+    data_nump:   (html.match(/data-nump=["'][^"']+["']/gi) || []).slice(0, 5),
+    post_id:     (html.match(/post_id['":\s=]+\d+/gi) || []).slice(0, 5),
+    nonce:       (html.match(/nonce['":\s=]+["'][a-f0-9]{8,}["']/gi) || []).slice(0, 5),
+    doo_action:  (html.match(/dooplay[^"'<>\s]{0,80}/gi) || []).slice(0, 5),
+    ajax_url:    (html.match(/ajax[_\-]?url['":\s=]+["'][^"']+["']/gi) || []).slice(0, 3),
+    p_param:     (html.match(/[?&]p=\d+/gi) || []).slice(0, 5),
   };
 
   return corsResponse(JSON.stringify({
