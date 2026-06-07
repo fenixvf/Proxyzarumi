@@ -19,7 +19,7 @@ const SOURCES = [
   {
     name:      "animesdrive",
     base:      "https://animesdrive.online/episodio",
-    extractor: null,
+    extractor: "https://drivea.masterotaku487.workers.dev",
   },
   {
     name:      "animeq",
@@ -124,24 +124,34 @@ async function extractViaWorker(extractorBase, sourceUrl) {
 
   const text = await res.text();
 
-  // Resposta HLS (m3u8)
+  // Resposta HLS (m3u8) — AniTube
   if (text.startsWith("#EXTM3U")) {
     return `${extractorBase}/?url=${encodeURIComponent(sourceUrl)}`;
   }
 
-  // Resposta JSON (AnimeQ)
+  // Resposta JSON — AnimésDrive / AnimeQ
   try {
     const data = JSON.parse(text);
-    if (data.success && Array.isArray(data.results)) {
-      const mp4 = data.results.find(r => r.type === "mp4" && r.url);
-      if (mp4) return mp4.url;
-      const any = data.results.find(r => r.url);
-      if (any) return any.url;
+    if (!data.success) return null;
+
+    if (Array.isArray(data.results) && data.results.length > 0) {
+      // Prefere mp4 direto
+      const mp4 = data.results.find(r => r.type === "mp4");
+      if (mp4) return mp4.proxyUrl || mp4.url;
+
+      // Fallback: iframe proxiado
+      const iframe = data.results.find(r => r.type === "iframe" && r.proxyUrl);
+      if (iframe) return iframe.proxyUrl;
+
+      // Qualquer resultado com URL
+      const any = data.results.find(r => r.proxyUrl || r.url);
+      if (any) return any.proxyUrl || any.url;
     }
+
     if (data.url) return data.url;
   } catch {}
 
-  // URL direta no texto
+  // URL mp4 direta no texto
   const mp4Match = text.match(/https?:\/\/[^\s"'<>]+\.mp4[^\s"'<>]*/i);
   if (mp4Match) return mp4Match[0];
 
