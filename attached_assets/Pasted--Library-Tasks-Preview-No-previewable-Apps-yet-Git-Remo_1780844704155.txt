@@ -1,0 +1,194 @@
+
+Library
+Tasks
+Preview
+No previewable Apps yet
+Git
+Remote Updates
+fenixvf/Proxyzarumi
+origin/main•upstream
+last fetched 10 hours ago
+Commit
+There are no changes to commit.
+Agent
+Sim
+
+12 hours ago
+The push was rejected by the remote. This is usually because the remote has commits that aren't in the local repository.
+
+12 hours ago
+Mas não tem isso no repositório
+
+12 hours ago
+PUSH_REJECTED
+The push was rejected by the remote. This is usually because the remote has commits that aren't in the local repository.
+
+12 hours ago
+Sim
+
+12 hours ago
+12 hours ago
+URLs hash-based — não tem padrão automatizável
+anitube.zip/939915b/
+
+Funciona SOMENTE via override manual no slug-overrides.json:
+{
+"mal_id": {
+"anitube": {
+"leg": { "1": "https://anitube.zip/abc123/", "2": "..." },
+"dub": { "1": "https://anitube.zip/xyz456/" }
+}
+}
+}
+
+12 hours ago
+Série
+animesdrive.online/episodio/{slug}-episodio-{ep2d}
+ex: animesdrive.online/episodio/rezero-kara-4th-season-episodio-03
+
+Filme/OVA
+animesdrive.online/episodio/{slug}
+ex: animesdrive.online/episodio/kimetsu-no-yaiba-movie-mugen-jou-hen
+
+Dub → adiciona -dublado no slug
+rezero-kara-4th-season-dublado-episodio-03
+
+Slug: romaji com hifens, sem acentos, pontuação removida
+Mesmo padrão do AnimesDrive, só muda o domínio
+animeq.net/episodio/{slug}-episodio-{ep2d}
+animeq.net/episodio/{slug} (filmes)
+
+URLs hash-based — não tem padrão automatizável
+anitube.zip/939915b/
+
+Funciona SOMENTE via override manual no slug-overrides.json:
+{
+"mal_id": {
+"anitube": {
+"leg": { "1": "https://anitube.zip/abc123/", "2": "..." },
+"dub": { "1": "https://anitube.zip/xyz456/" }
+}
+}
+}
+
+12 hours ago
+Como posso testar
+
+12 hours ago
+Como faço pro Proxy retornar o mp4 utilizando slug esse por exemplo :rezero-kara-hajimeru-isekai-seikatsu-4th-season
+
+11 hours ago
+{"error":"Video not found after all retries","tried":["https://animesdrive.online/episodio/rezero-kara-hajimeru-isekai-seikatsu-4th-season-episodio-01","https://animesdrive.online/episodio/rezero-kara-hajimeru-isekai-seikatsu-4th-season-episodio-1","https://animesdrive.online/episodio/rezero-kara-hajimeru-isekai-seikatsu-4th-season-ep-01","https://animeq.net/episodio/rezero-kara-hajimeru-isekai-seikatsu-4th-season-episodio-01","https://animeq.net/episodio/rezero-kara-hajimeru-isekai-seikatsu-4th-season-episodio-1","https://animeq.net/episodio/rezero-kara-hajimeru-isekai-seikatsu-4th-season-ep-01"],"detail":"HTTP 404 → https://animeq.net/episodio/rezero-kara-hajimeru-isekai-seikatsu-4th-season-ep-01"}
+
+11 hours ago
+rezero-kara-hajimeru-isekai-seikatsu-4th-season-episodio-01
+
+11 hours ago
+{
+"url": "https://animesdrive.online/episodio/rezero-kara-hajimeru-isekai-seikatsu-4th-season-episodio-01",
+"html_length": 63437,
+"patterns": {
+"source_tag": [],
+"file_attr": [],
+"json_src": [],
+"iframe_src": [],
+"mp4_urls": [],
+"jwplayer": [],
+"playerjs": [],
+"video_tag": [],
+"setup_call": []
+}
+}
+
+11 hours ago
+11 hours ago
+11 hours ago
+{"error":"Video not found after all retries","tried":["https://animesdrive.online/episodio/rezero-kara-hajimeru-isekai-seikatsu-4th-season-episodio-01","https://animesdrive.online/episodio/rezero-kara-hajimeru-isekai-seikatsu-4th-season-episodio-1","https://animesdrive.online/episodio/rezero-kara-hajimeru-isekai-seikatsu-4th-season-ep-01","https://animeq.net/episodio/rezero-kara-hajimeru-isekai-seikatsu-4th-season-episodio-01","https://animeq.net/episodio/rezero-kara-hajimeru-isekai-seikatsu-4th-season-episodio-1","https://animeq.net/episodio/rezero-kara-hajimeru-isekai-seikatsu-4th-season-ep-01"],"detail":"HTTP 404 → https://animeq.net/episodio/rezero-kara-hajimeru-isekai-seikatsu-4th-season-ep-01"}
+
+Nem as outras fontes estão funcionando
+
+11 hours ago
+11 hours ago
+{
+"ajaxUrl": "https://animesdrive.online/wp-admin/admin-ajax.php",
+"post_id": "66598",
+"nonce": "3276d5a191",
+"results": [
+{
+"action": "dooplay_ajax_player",
+"status": 400,
+"response": "0"
+},
+{
+"action": "dooplay_player_ajax",
+"status": 400,
+"response": "0"
+}
+]
+}
+
+11 hours ago
+Eu queria que fizesse como neste wokers
+Ele funciona direitinho https://aq.masterotaku487.workers.dev/?url=https://animeq.net/filme/jujutsu-kaisen-0-o-filme-dublado/https://at.masterotaku487.workers.dev/?url=https://www.anitube.zip/939915b/
+
+11 hours ago
+Série
+animesdrive.online/episodio/{slug}-episodio-{ep2d}
+ex: animesdrive.online/episodio/rezero-kara-4th-season-episodio-03
+
+Filme/OVA
+animesdrive.online/episodio/{slug}
+ex: animesdrive.online/episodio/kimetsu-no-yaiba-movie-mugen-jou-hen
+
+Dub → adiciona -dublado no slug
+rezero-kara-4th-season-dublado-episodio-03
+
+Slug: romaji com hifens, sem acentos, pontuação removida# Mesmo padrão do AnimesDrive, só muda o domínio
+animeq.net/episodio/{slug}-episodio-{ep2d}
+animeq.net/episodio/{slug} (filmes)
+
+Usa os mesmos slugs gerados pelo DriveA
+11 hours ago
+https://drivea.masterotaku487.workers.dev/?proxy=https://aniplay.online/Midias/Animes/Letra-R/Re-Zero-4/01.mp4
+https://drivea.masterotaku487.workers.dev/?proxy=https://aniplay.online/Midias/Animes/Letra-R/Re-Zero-4/Dub/02.mp4
+
+11 hours ago
+Ta usando Proxy de outra pessoa?
+
+10 hours ago
+Quero ter os meus próprios
+
+10 hours ago
+Vou criar os seus próprios três workers extratores. Deixa eu primeiro verificar como o AniTube funciona internamente:
+
+Tenho o padrão do AniTube (cdn-s01.mywallpaper-4k-image.net/stream/.../index.m3u8). Agora vou criar os três workers de uma vez em paralelo:
+
+Agora crio o worker do AnimeQ (idêntico ao drivea, só muda referer) e atualizo o GitHub Actions para deployar tudo:
+
+Agora atualizo o zarumi-proxy para usar os seus próprios extratores:
+
+Pronto! Aqui está um resumo do que foi criado e o que você precisa fazer:
+
+3 workers criados ✅
+Worker	Arquivo	Função
+zarumi-drivea	zarumi-drivea/worker.js	Extrai links do AnimésDrive (DooPlay AJAX + proxy)
+zarumi-aq	zarumi-aq/worker.js	Extrai links do AnimeQ (DooPlay AJAX + proxy)
+zarumi-at	zarumi-at/worker.js	Extrai e faz proxy HLS do AniTube
+O que você precisa fazer
+1. Saber seu username do Cloudflare
+Acesse dash.cloudflare.com → veja o subdomínio na URL dos seus workers (ex: fenixvf.workers.dev).
+
+2. Substituir SEU-USUARIO em 4 arquivos
+Nos arquivos abaixo, troca SEU-USUARIO pelo seu username real:
+
+zarumi-drivea/worker.js — linha const WORKER_BASE
+zarumi-aq/worker.js — linha const WORKER_BASE
+zarumi-at/worker.js — linha const WORKER_BASE
+zarumi-proxy/worker.sw.js — nas 3 URLs dos extratores
+3. Deploy (via Cloudflare Dashboard)
+Para cada worker, crie manualmente no dashboard e cole o código:
+
+Workers & Pages → Create application → Create Worker
+Nome: zarumi-drivea → Cole o worker.js
+Repita para zarumi-aq e zarumi-at
+Quer que eu atualize os arquivos automaticamente com seu username? 
