@@ -40,6 +40,7 @@ async function handleRequest(request) {
   if (path === "/override")        return handleOverride(url.searchParams, request);
   if (path === "/override/delete") return handleOverrideDelete(url.searchParams);
   if (path === "/debug")           return handleDebug(url.searchParams);
+  if (path === "/debug/ajax")      return handleDebugAjax(url.searchParams);
 
   return corsResponse(JSON.stringify({ error: "Not found" }), 404);
 }
@@ -180,6 +181,51 @@ async function handleOverrideDelete(params) {
 
   await kvDelete(`override:${mal_id}`);
   return corsResponse(JSON.stringify({ deleted: `override:${mal_id}` }), 200);
+}
+
+// ─── /debug/ajax ─────────────────────────────────────────────────────────────
+// GET /debug/ajax?origin=https://animesdrive.online&post_id=66598&nonce=3276d5a191&nump=1
+
+async function handleDebugAjax(params) {
+  const origin  = params.get("origin");
+  const postId  = params.get("post_id");
+  const nonce   = params.get("nonce") || "";
+  const nump    = params.get("nump") || "1";
+
+  if (!origin || !postId) {
+    return corsResponse(JSON.stringify({ error: "Missing origin or post_id" }), 400);
+  }
+
+  const ajaxUrl = `${origin}/wp-admin/admin-ajax.php`;
+  const results = [];
+
+  for (const action of ["dooplay_ajax_player", "dooplay_player_ajax"]) {
+    const body = new URLSearchParams({
+      action,
+      post_id: postId,
+      nump,
+      ...(nonce ? { _nonce: nonce } : {}),
+    });
+
+    try {
+      const res = await fetch(ajaxUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+          "Referer": origin,
+          "X-Requested-With": "XMLHttpRequest",
+        },
+        body: body.toString(),
+      });
+      const text = await res.text();
+      results.push({ action, status: res.status, response: text.slice(0, 2000) });
+    } catch (err) {
+      results.push({ action, error: err.message });
+    }
+  }
+
+  return corsResponse(JSON.stringify({ ajaxUrl, post_id: postId, nonce, results }, null, 2), 200);
 }
 
 // ─── /debug ──────────────────────────────────────────────────────────────────
@@ -349,7 +395,7 @@ async function tryDooplayAjax(html, pageUrl) {
         action: "dooplay_ajax_player",
         post_id: postId,
         nump: String(nump),
-        ...(nonce ? { _wpnonce: nonce } : {}),
+        ...(nonce ? { _nonce: nonce } : {}),
       });
 
       const res = await fetch(ajaxUrl, {

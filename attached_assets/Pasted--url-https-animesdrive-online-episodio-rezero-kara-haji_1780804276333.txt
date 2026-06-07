@@ -1,0 +1,39 @@
+{
+  "url": "https://animesdrive.online/episodio/rezero-kara-hajimeru-isekai-seikatsu-4th-season-episodio-01",
+  "html_length": 63437,
+  "patterns": {
+    "source_tag": [],
+    "file_attr": [],
+    "json_src": [],
+    "iframe_src": [],
+    "mp4_urls": [],
+    "jwplayer": [],
+    "playerjs": [],
+    "video_tag": [],
+    "setup_call": [],
+    "data_post": [
+      "data-post='66598'",
+      "data-post='66598'",
+      "data-post='66598'",
+      "data-post='66598'"
+    ],
+    "data_nump": [],
+    "post_id": [],
+    "nonce": [
+      "nonce\":\"3276d5a191\"",
+      "nonce\":\"2cf7e710c5\""
+    ],
+    "doo_action": [
+      "dooplay/assets/fontawesome/css/all.min.css?ver=1780753971",
+      "dooplay/assets/css/front.owl.min.css?ver=2.5.5",
+      "dooplay/assets/css/front.crollbar.min.css?ver=2.5.5",
+      "dooplay-css",
+      "dooplay/assets/css/front.style.min.css?ver=2.5.5"
+    ],
+    "ajax_url": [],
+    "p_param": []
+  },
+  "html_start": "<!DOCTYPE html><html lang=\"pt-BR\"><head><meta charset=\"UTF-8\" /><link rel='apple-touch-icon' href='https://animesdrive.online/wp-content/uploads/2026/03/ico-1.png'/><meta name=\"apple-mobile-web-app-capable\" content=\"yes\"><meta name=\"apple-mobile-web-app-status-bar-style\" content=\"black\"><meta name=\"mobile-web-app-capable\" content=\"yes\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1, shrink-to-fit=no\"><meta name=\"theme-color\" content=\"#000000\"><link rel='shortcut icon' href='https://animesdrive.online/wp-content/uploads/2026/03/ico-1.png' type='image/x-icon' /><meta property='og:image' content='https://image.tmdb.org/t/p/w780/6BZt6rt5m8PEI8lenqL1b89MwpE.jpg\r'/><meta property='og:image' content='https://image.tmdb.org/t/p/w780/b9w0Fnep3I1GdKNayckfuggHuEK.jpg\r'/><meta property='og:image' content='https://image.tmdb.org/t/p/w780/myiyBwQXmJShAf5tZs5T1nOiVzC.jpg\r'/><meta property='og:image' content='https://image.tmdb.org/t/p/w780/tWMHnyFIhw6YYCBCvHIotVxflQQ.jpg\r'/><meta property='og:image' content='https://image.tmdb.org/t/p/w780/wSPbbdNht6Djg6Z99ut72bZhvqM.jpg\r'/><meta property='og:image' content='https://image.tmdb.org/t/p/w780/rd8pWCzhdMUsmMGszftRr5qeSQq.jpg'/><meta name='robots' content='index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1' /><!-- This site is optimized with the Yoast SEO plugin v27.5 - https://yoast.com/product/yoast-seo-wordpress/ --><title>Re:Zero kara Hajimeru Isekai Seikatsu 4th Season Episodio 01 Online</title><link data-rocket-prefetch href=\"https://t.dtscout.com\" rel=\"dns-prefetch\"><link data-rocket-prefetch href=\"https://whos.amung.us\" rel=\"dns-prefetch\"><link data-rocket-prefetch href=\"https://www.google-analytics.com\" rel=\"dns-prefetch\"><link data-rocket-prefetch href=\"https://www.blogger.com\" rel=\"dns-prefetch\"><link data-rocket-prefetch href=\"https://sx.ptosesveg.com\" rel=\"dns-prefetch\"><link data-rocket-prefetch href=\"https://llvpn.com\" rel=\"dns-prefetch\"><link rel=\"preload\" data-rocket-preloa",
+  "html_mid": "-video-error\" class=\"report_modal hidde\"> <div class=\"box animation-3\"> <div class=\"form\"> <h3 id=\"report-title\"><span>Utilize o campo abaixo ou envie um email para <a href=\"/cdn-cgi/l/email-protection\" class=\"__cf_email__\" data-cfemail=\"97f4f8f9e3f6e3f8f6f9fefaf2e4f3e5fee1f2d7f0faf6fefbb9f4f8fa\">[email&#160;protected]</a></span> <a class=\"close-modal-report\"><i class=\"fas fa-times\"></i></a></h3> <div id=\"report-response-message\"></div> <div class=\"dooplay-report-form\"> <form id=\"dooplay-report-form\"> <fieldset> <label> <input class=\"report-video-checkbox\" type=\"checkbox\" name=\"problem[]\" autocomplete=\"off\" value=\"labeling\"> <span class=\"title\">Episódio errado</span> <span class=\"text\">O episódio está errado ou fora de ordem \"</span> </label> <label> <input class=\"report-video-checkbox\" type=\"checkbox\" name=\"problem[]\" autocomplete=\"off\" value=\"video\"> <span class=\"title\">Qualidade da Imagem</span> <span class=\"text\">Imagem do video está ruim</span> </label> <label> <input class=\"report-video-checkbox\" type=\"checkbox\" name=\"problem[]\" autocomplete=\"off\" value=\"audio\"> <span class=\"title\">Problema no Som</span> <span class=\"text\">O audio está fora de sincronia</span> </label> <label> <input class=\"report-video-checkbox\" type=\"checkbox\" name=\"problem[]\" autocomplete=\"off\" value=\"caption\"> <span class=\"title\">Legendas erradas</span> <span class=\"text\">A legenda está apresentando erros</span> </label> <label> <input class=\"report-video-checkbox\" type=\"checkbox\" name=\"problem[]\" autocomplete=\"off\" value=\"buffering\"> <span class=\"title\">Carregamento lento</span> <span class=\"text\">O vídeo esta demorando para carregar</span> </label> </fieldset> <fieldset id=\"report-video-message-field\"> <textarea name=\"message\" rows=\"3\" placeholder=\"Por favor descreva o problema encontrado\"></textarea> </fieldset> <fieldset id=\"report-video-email-field\"> <input type=\"email\" name=\"email\" placeholder=\"adicione seu email nesse campo\"> </fieldset> <fieldset id=\"report-video-button-field\"> <in",
+  "html_end": "='10400545',s.src='https://llvpn.com/tag.min.js'})([document.documentElement, document.body].filter(Boolean).pop().appendChild(document.createElement('script')))</script><!-- M --><script type=\"text/javascript\" data-cfasync=\"false\">/*<![CDATA[/* */(function(){var f=window,m=\"e7b724267092b46ba4218a79eac2d895\",d=[[\"siteId\",319*370*629-68972669],[\"minBid\",0],[\"popundersPerIP\",\"0\"],[\"delayBetween\",0],[\"default\",false],[\"defaultPerDay\",0],[\"topmostLayer\",\"auto\"]],g=[\"d3d3LnZpc2FyaW9tZWRpYS5jb20vcmFsZXJ0aWZ5Lm1pbi5jc3M=\",\"ZDEzazdwcmF4MXlpMDQuY2xvdWRmcm9udC5uZXQvbHRtSC94cGFyc2UubWluLmpz\"],x=-1,r,q,h=function(){clearTimeout(q);x++;if(g[x]&&!(1806462085000<(new Date).getTime()&&1<x)){r=f.document.createElement(\"script\");r.type=\"text/javascript\";r.async=!0;var p=f.document.getElementsByTagName(\"script\")[0];r.src=\"https://\"+atob(g[x]);r.crossOrigin=\"anonymous\";r.onerror=h;r.onload=function(){clearTimeout(q);f[m.slice(0,16)+m.slice(0,16)]||h()};q=setTimeout(h,5E3);p.parentNode.insertBefore(r,p)}};if(!f[m]){try{Object.freeze(f[m]=d)}catch(e){}h()}})();/*]]>/* */</script><!-- M --><div style=\"display:none;\"><script id=\"_waug43\" type=\"39cd77f24b709dfb2a4a7c3a-text/javascript\">var _wau = _wau || []; _wau.push([\"small\", \"cuyxcgmiov\", \"g43\"]);</script><script data-minify=\"1\" async src=\"https://animesdrive.online/wp-content/cache/min/1/s.js?ver=1780753971\" type=\"39cd77f24b709dfb2a4a7c3a-text/javascript\"></script></div><div id=\"oscuridad\"></div><div id=\"blueimp-gallery\" class=\"blueimp-gallery\"> <div class=\"slides\"></div> <h3 class=\"title\"></h3> <a class=\"prev\">&lsaquo;</a> <a class=\"next\">&rsaquo;</a> <a class=\"close\">&times;</a> <a class=\"play-pause\"></a> <ol class=\"indicator\"></ol></div><script src=\"/cdn-cgi/scripts/7d0fa10a/cloudflare-static/rocket-loader.min.js\" data-cf-settings=\"39cd77f24b709dfb2a4a7c3a-|49\" defer></script></body></html>\n<!-- This website is like a Rocket, isn't it? Performance optimized by WP Rocket. Learn more: https://wp-rocket.me - Debug: cached@1780763200 -->"
+}
