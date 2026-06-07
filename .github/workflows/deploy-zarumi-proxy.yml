@@ -1,0 +1,20 @@
+name: Deploy zarumi-proxy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "zarumi-proxy/**"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy Worker
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CF_API_TOKEN }}
+          accountId: ${{ secrets.CF_ACCOUNT_ID }}
+          workingDirectory: zarumi-proxy
