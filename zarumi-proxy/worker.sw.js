@@ -1,6 +1,7 @@
 /**
  * Zarumi Proxy Worker — Service Worker format
- * Compatível com o editor padrão do Cloudflare Dashboard
+ * Fontes: AnimésDrive → AnimeQ → override manual (AniTube / qualquer fonte hash-based)
+ * Cache com KV (TTL 6h) + Retry automático com slugs alternativos
  */
 
 const ALLOWED_ORIGINS = [
@@ -9,9 +10,14 @@ const ALLOWED_ORIGINS = [
   "http://localhost:3000",
 ];
 
-const SOURCE_BASE = "https://animesdrive.online/episodio";
-const CACHE_TTL   = 60 * 60 * 6;
-const MAX_RETRIES = 3;
+const SOURCES = [
+  { name: "animesdrive", base: "https://animesdrive.online/episodio" },
+  { name: "animeq",      base: "https://animeq.net/episodio" },
+];
+
+const CACHE_TTL    = 60 * 60 * 6;
+const OVERRIDE_TTL = 60 * 60 * 24 * 30;
+const MAX_RETRIES  = 3;
 
 addEventListener("fetch", (event) => {
   event.respondWith(handleRequest(event.request));
@@ -28,49 +34,71 @@ async function handleRequest(request) {
   const url  = new URL(request.url);
   const path = url.pathname;
 
-  if (path === "/video")       return handleVideo(url.searchParams);
-  if (path === "/slug")        return handleSlug(url.searchParams);
-  if (path === "/cache/clear") return handleCacheClear(url.searchParams);
+  if (path === "/video")           return handleVideo(url.searchParams, request.method);
+  if (path === "/slug")            return handleSlug(url.searchParams);
+  if (path === "/cache/clear")     return handleCacheClear(url.searchParams);
+  if (path === "/override")        return handleOverride(url.searchParams, request);
+  if (path === "/override/delete") return handleOverrideDelete(url.searchParams);
 
   return corsResponse(JSON.stringify({ error: "Not found" }), 404);
 }
 
+// ─── /video ─────────────────────────────────────────────────────────────────
+
 async function handleVideo(params) {
-  const slug = params.get("slug");
-  const ep   = params.get("ep");
-  const type = params.get("type") || "serie";
-  const dub  = params.get("dub") === "true";
+  const slug   = params.get("slug");
+  const ep     = params.get("ep");
+  const type   = params.get("type") || "serie";
+  const dub    = params.get("dub") === "true";
+  const mal_id = params.get("mal_id");
 
   if (!slug) return corsResponse(JSON.stringify({ error: "Missing slug" }), 400);
 
   const cacheKey = `v1:${slug}:${ep ?? "none"}:${type}:${dub ? "dub" : "leg"}`;
 
+  // 1. Cache hit
   const cached = await kvGet(cacheKey);
   if (cached) return corsResponse(JSON.stringify({ ...cached, cached: true }), 200);
 
-  const slugVariants = buildSlugVariants(slug, ep, type, dub);
+  // 2. Override manual (AniTube / hash-based)
+  if (mal_id) {
+    const override = await getOverride(mal_id, ep, dub);
+    if (override) {
+      const result = { url: override, source: "override", attempt: 0, label: "override" };
+      await kvSet(cacheKey, result, CACHE_TTL);
+      return corsResponse(JSON.stringify(result), 200);
+    }
+  }
 
+  // 3. Extração automática: AnimésDrive → AnimeQ
+  const slugVariants = buildSlugVariants(slug, ep, type, dub);
   let lastError = null;
-  for (let i = 0; i < slugVariants.length && i < MAX_RETRIES; i++) {
-    const { sourceUrl, label } = slugVariants[i];
-    try {
-      const mp4Url = await extractVideoUrl(sourceUrl);
-      if (mp4Url) {
-        const result = { url: mp4Url, source: sourceUrl, attempt: i + 1, label };
-        await kvSet(cacheKey, result, CACHE_TTL);
-        return corsResponse(JSON.stringify(result), 200);
+
+  for (const source of SOURCES) {
+    for (let i = 0; i < slugVariants.length && i < MAX_RETRIES; i++) {
+      const { path: slugPath, label } = slugVariants[i];
+      const sourceUrl = `${source.base}/${slugPath}`;
+      try {
+        const mp4Url = await extractVideoUrl(sourceUrl);
+        if (mp4Url) {
+          const result = { url: mp4Url, source: sourceUrl, attempt: i + 1, label, provider: source.name };
+          await kvSet(cacheKey, result, CACHE_TTL);
+          return corsResponse(JSON.stringify(result), 200);
+        }
+      } catch (err) {
+        lastError = err.message;
       }
-    } catch (err) {
-      lastError = err.message;
     }
   }
 
   return corsResponse(JSON.stringify({
     error: "Video not found after all retries",
-    tried: slugVariants.map(v => v.sourceUrl),
+    tried: SOURCES.flatMap(s => slugVariants.map(v => `${s.base}/${v.path}`)),
     detail: lastError,
   }), 404);
 }
+
+// ─── /slug ──────────────────────────────────────────────────────────────────
 
 async function handleSlug(params) {
   const title = params.get("title");
@@ -86,6 +114,8 @@ async function handleSlug(params) {
   return corsResponse(JSON.stringify({ slug, variants }), 200);
 }
 
+// ─── /cache/clear ───────────────────────────────────────────────────────────
+
 async function handleCacheClear(params) {
   const slug = params.get("slug");
   const ep   = params.get("ep");
@@ -100,12 +130,79 @@ async function handleCacheClear(params) {
   return corsResponse(JSON.stringify({ cleared: cacheKey }), 200);
 }
 
+// ─── /override ──────────────────────────────────────────────────────────────
+// GET  /override?mal_id=123&ep=1&dub=false          → lê o override
+// POST /override  body: { mal_id, provider, leg:{ep:url}, dub:{ep:url} }  → salva
+
+async function handleOverride(params, request) {
+  if (request.method === "POST") {
+    let body;
+    try { body = await request.json(); } catch {
+      return corsResponse(JSON.stringify({ error: "Invalid JSON body" }), 400);
+    }
+
+    const { mal_id, provider = "anitube", leg = {}, dub = {} } = body;
+    if (!mal_id) return corsResponse(JSON.stringify({ error: "Missing mal_id" }), 400);
+
+    const overrideKey = `override:${mal_id}`;
+    const existing    = await kvGet(overrideKey) || {};
+    const updated     = {
+      ...existing,
+      [provider]: { leg: { ...(existing[provider]?.leg || {}), ...leg },
+                    dub: { ...(existing[provider]?.dub || {}), ...dub } },
+    };
+    await kvSet(overrideKey, updated, OVERRIDE_TTL);
+    return corsResponse(JSON.stringify({ saved: overrideKey, data: updated }), 200);
+  }
+
+  // GET
+  const mal_id = params.get("mal_id");
+  const ep     = params.get("ep");
+  const dub    = params.get("dub") === "true";
+
+  if (!mal_id) return corsResponse(JSON.stringify({ error: "Missing mal_id" }), 400);
+
+  const overrideKey = `override:${mal_id}`;
+  const data        = await kvGet(overrideKey);
+
+  if (!data) return corsResponse(JSON.stringify({ found: false }), 404);
+  if (!ep)   return corsResponse(JSON.stringify({ found: true, data }), 200);
+
+  const url = getOverrideUrl(data, ep, dub);
+  return corsResponse(JSON.stringify({ found: !!url, url: url || null, data }), 200);
+}
+
+// DELETE /override/delete?mal_id=123
+async function handleOverrideDelete(params) {
+  const mal_id = params.get("mal_id");
+  if (!mal_id) return corsResponse(JSON.stringify({ error: "Missing mal_id" }), 400);
+
+  await kvDelete(`override:${mal_id}`);
+  return corsResponse(JSON.stringify({ deleted: `override:${mal_id}` }), 200);
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+async function getOverride(mal_id, ep, dub) {
+  const data = await kvGet(`override:${mal_id}`);
+  if (!data) return null;
+  return getOverrideUrl(data, ep, dub);
+}
+
+function getOverrideUrl(data, ep, dub) {
+  for (const provider of Object.values(data)) {
+    const track = dub ? provider.dub : provider.leg;
+    if (track && ep && track[String(ep)]) return track[String(ep)];
+  }
+  return null;
+}
+
 function buildSlugVariants(slug, ep, type, dub) {
   if (type !== "serie") {
     return [
-      { label: "padrao",    sourceUrl: `${SOURCE_BASE}/${slug}` },
-      { label: "com-filme", sourceUrl: `${SOURCE_BASE}/${slug}-filme` },
-      { label: "com-ova",   sourceUrl: `${SOURCE_BASE}/${slug}-ova` },
+      { label: "padrao",    path: slug },
+      { label: "com-filme", path: `${slug}-filme` },
+      { label: "com-ova",   path: `${slug}-ova` },
     ];
   }
 
@@ -114,9 +211,9 @@ function buildSlugVariants(slug, ep, type, dub) {
   const ep1d = String(ep);
 
   return [
-    { label: "padrao",   sourceUrl: `${SOURCE_BASE}/${slug}${dubSuffix}-episodio-${ep2d}` },
-    { label: "sem-zero", sourceUrl: `${SOURCE_BASE}/${slug}${dubSuffix}-episodio-${ep1d}` },
-    { label: "alias-ep", sourceUrl: `${SOURCE_BASE}/${slug}${dubSuffix}-ep-${ep2d}` },
+    { label: "padrao",   path: `${slug}${dubSuffix}-episodio-${ep2d}` },
+    { label: "sem-zero", path: `${slug}${dubSuffix}-episodio-${ep1d}` },
+    { label: "alias-ep", path: `${slug}${dubSuffix}-ep-${ep2d}` },
   ];
 }
 
@@ -146,7 +243,7 @@ async function extractVideoUrl(pageUrl) {
   if (iframeSrc) {
     const iframeUrl = iframeSrc[1].startsWith("http")
       ? iframeSrc[1]
-      : `https://animesdrive.online${iframeSrc[1]}`;
+      : new URL(iframeSrc[1], pageUrl).href;
     return await extractVideoUrl(iframeUrl);
   }
 
@@ -206,7 +303,7 @@ function corsResponse(body, status = 200) {
     headers: {
       "Content-Type": "application/json; charset=utf-8",
       "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "GET, OPTIONS",
+      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
       "Access-Control-Allow-Headers": "Content-Type",
       "Cache-Control": "no-store",
     },
