@@ -271,6 +271,10 @@ async function extractVideoUrl(pageUrl) {
   const found = extractFromHtml(html, pageUrl);
   if (found) return found;
 
+  // DooPlay: extrai via AJAX (wp-admin/admin-ajax.php)
+  const dooplay = await tryDooplayAjax(html, pageUrl);
+  if (dooplay) return dooplay;
+
   // Tenta variante ?trembed=1 (padrão WordPress de anime BR)
   const trembed = await tryTrembed(pageUrl);
   if (trembed) return trembed;
@@ -305,6 +309,79 @@ function extractFromHtml(html, baseUrl) {
   const anyMp4 = html.match(/https?:\/\/[^\s"'<>]+\.mp4[^\s"'<>]*/i);
   if (anyMp4) return anyMp4[0];
 
+  return null;
+}
+
+async function tryDooplayAjax(html, pageUrl) {
+  const origin = new URL(pageUrl).origin;
+  const ajaxUrl = `${origin}/wp-admin/admin-ajax.php`;
+
+  // Extrai post_id
+  const postIdMatch =
+    html.match(/data-post=["'](\d+)["']/i) ||
+    html.match(/"post_id"\s*:\s*(\d+)/i) ||
+    html.match(/var\s+post_id\s*=\s*(\d+)/i) ||
+    html.match(/[?&]p=(\d+)/i) ||
+    html.match(/"postid"\s*:\s*(\d+)/i);
+
+  if (!postIdMatch) return null;
+  const postId = postIdMatch[1];
+
+  // Extrai nonce (pode ter vários formatos)
+  const nonceMatch =
+    html.match(/["']nonce["']\s*:\s*["']([a-f0-9]+)["']/i) ||
+    html.match(/nonce\s*=\s*["']([a-f0-9]+)["']/i) ||
+    html.match(/["']_wpnonce["']\s*:\s*["']([a-f0-9]+)["']/i);
+  const nonce = nonceMatch ? nonceMatch[1] : "";
+
+  // Tenta cada servidor (nump 1..5)
+  for (let nump = 1; nump <= 5; nump++) {
+    try {
+      const body = new URLSearchParams({
+        action: "dooplay_ajax_player",
+        post_id: postId,
+        nump: String(nump),
+        ...(nonce ? { _wpnonce: nonce } : {}),
+      });
+
+      const res = await fetch(ajaxUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "Referer": pageUrl,
+          "X-Requested-With": "XMLHttpRequest",
+        },
+        body: body.toString(),
+      });
+
+      if (!res.ok) continue;
+      const data = await res.json().catch(() => null);
+      if (!data) continue;
+
+      // Resposta pode ser { embed: "<iframe...>" } ou { url: "..." }
+      const embedHtml = data.embed || data.player || data.content || "";
+      if (embedHtml) {
+        const found = extractFromHtml(embedHtml, pageUrl);
+        if (found) return found;
+
+        // iframe dentro da resposta AJAX
+        const iframeSrc = embedHtml.match(/<iframe[^>]+src=["']([^"']+)["']/i);
+        if (iframeSrc) {
+          const iframeUrl = iframeSrc[1].startsWith("http")
+            ? iframeSrc[1]
+            : new URL(iframeSrc[1], origin).href;
+          try {
+            const inner = await fetchPage(iframeUrl);
+            const innerFound = extractFromHtml(inner, iframeUrl);
+            if (innerFound) return innerFound;
+          } catch {}
+        }
+      }
+
+      if (data.url) return data.url;
+    } catch {}
+  }
   return null;
 }
 
