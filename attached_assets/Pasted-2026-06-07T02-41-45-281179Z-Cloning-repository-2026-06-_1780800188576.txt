@@ -1,0 +1,78 @@
+2026-06-07T02:41:45.281179Z	Cloning repository...
+2026-06-07T02:41:46.384529Z	From https://github.com/fenixvf/Proxyzarumi
+2026-06-07T02:41:46.384948Z	 * branch            e12f948366614a401c7ee7242ac6245adcce8419 -> FETCH_HEAD
+2026-06-07T02:41:46.385066Z	
+2026-06-07T02:41:46.41142Z	HEAD is now at e12f948 Update project deployment configuration and logs
+2026-06-07T02:41:46.411818Z	
+2026-06-07T02:41:46.462687Z	
+2026-06-07T02:41:46.463121Z	Using v2 root directory strategy
+2026-06-07T02:41:46.480382Z	Success: Finished cloning repository files
+2026-06-07T02:41:48.965016Z	Checking for configuration in a Wrangler configuration file (BETA)
+2026-06-07T02:41:48.965639Z	
+2026-06-07T02:41:49.146918Z	No Wrangler configuration file found. Continuing.
+2026-06-07T02:41:49.338251Z	Detected the following tools from environment: pnpm@10.11.1, nodejs@22.16.0
+2026-06-07T02:41:50.667017Z	Installing project dependencies: pnpm install
+2026-06-07T02:41:51.2601Z	Scope: all 8 workspace projects
+2026-06-07T02:41:51.333131Z	Lockfile is up to date, resolution step is skipped
+2026-06-07T02:41:51.378905Z	Progress: resolved 1, reused 0, downloaded 0, added 0
+2026-06-07T02:41:51.464359Z	Packages: +476
+2026-06-07T02:41:51.467546Z	++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+2026-06-07T02:41:52.3792Z	Progress: resolved 476, reused 0, downloaded 120, added 120
+2026-06-07T02:41:53.379134Z	Progress: resolved 476, reused 0, downloaded 200, added 188
+2026-06-07T02:41:54.379627Z	Progress: resolved 476, reused 0, downloaded 296, added 236
+2026-06-07T02:41:55.384271Z	Progress: resolved 476, reused 0, downloaded 448, added 390
+2026-06-07T02:41:55.775831Z	Progress: resolved 476, reused 0, downloaded 476, added 476, done
+2026-06-07T02:41:56.122667Z	.../esbuild@0.27.3/node_modules/esbuild postinstall$ node install.js
+2026-06-07T02:41:56.24417Z	.../esbuild@0.27.3/node_modules/esbuild postinstall: Done
+2026-06-07T02:41:56.588947Z	
+2026-06-07T02:41:56.589614Z	devDependencies:
+2026-06-07T02:41:56.589734Z	+ prettier 3.8.3
+2026-06-07T02:41:56.589812Z	+ typescript 5.9.3
+2026-06-07T02:41:56.58987Z	
+2026-06-07T02:41:56.668876Z	. preinstall$ sh -c 'rm -f package-lock.json yarn.lock; case "$npm_config_user_agent" in pnpm/*) ;; *) echo "Use pnpm instead" >&2; exit 1 ;; esac'
+2026-06-07T02:41:56.703292Z	. preinstall: Done
+2026-06-07T02:41:56.950596Z	Done in 6s using pnpm v10.11.1
+2026-06-07T02:41:56.999884Z	Executing user command: npm install
+2026-06-07T02:42:05.595645Z	npm warn ERESOLVE overriding peer dependency
+2026-06-07T02:42:05.59601Z	npm warn While resolving: typescript@5.9.3
+2026-06-07T02:42:05.59612Z	npm warn Found: peer eslint@"^8.57.0 || ^9.0.0 || ^10.0.0" from @typescript-eslint/rule-tester@8.60.1
+2026-06-07T02:42:05.596209Z	npm warn node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/node_modules/@typescript-eslint/rule-tester
+2026-06-07T02:42:05.596283Z	npm warn   dev @typescript-eslint/rule-tester@"^8.24.1" from typescript@5.9.3
+2026-06-07T02:42:05.596334Z	npm warn   node_modules/.pnpm/typescript@5.9.3/node_modules/typescript
+2026-06-07T02:42:05.596389Z	npm warn
+2026-06-07T02:42:05.596444Z	npm warn Could not resolve dependency:
+2026-06-07T02:42:05.596532Z	npm warn peer eslint@"^8.57.0 || ^9.0.0 || ^10.0.0" from @typescript-eslint/rule-tester@8.60.1
+2026-06-07T02:42:05.596632Z	npm warn node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/node_modules/@typescript-eslint/rule-tester
+2026-06-07T02:42:05.596689Z	npm warn   dev @typescript-eslint/rule-tester@"^8.24.1" from typescript@5.9.3
+2026-06-07T02:42:05.59674Z	npm warn   node_modules/.pnpm/typescript@5.9.3/node_modules/typescript
+2026-06-07T02:42:05.596801Z	npm warn ERESOLVE overriding peer dependency
+2026-06-07T02:42:05.596844Z	npm warn While resolving: typescript@5.9.3
+2026-06-07T02:42:05.596899Z	npm warn Found: peer eslint@"^8.57.0 || ^9.0.0 || ^10.0.0" from @typescript-eslint/type-utils@8.60.1
+2026-06-07T02:42:05.596951Z	npm warn node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/node_modules/@typescript-eslint/type-utils
+2026-06-07T02:42:05.597024Z	npm warn   dev @typescript-eslint/type-utils@"^8.24.1" from typescript@5.9.3
+2026-06-07T02:42:05.59707Z	npm warn   node_modules/.pnpm/typescript@5.9.3/node_modules/typescript
+2026-06-07T02:42:05.597114Z	npm warn
+2026-06-07T02:42:05.597275Z	npm warn Could not resolve dependency:
+2026-06-07T02:42:05.597359Z	npm warn peer eslint@"^8.57.0 || ^9.0.0 || ^10.0.0" from @typescript-eslint/type-utils@8.60.1
+2026-06-07T02:42:05.597409Z	npm warn node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/node_modules/@typescript-eslint/type-utils
+2026-06-07T02:42:05.59747Z	npm warn   dev @typescript-eslint/type-utils@"^8.24.1" from typescript@5.9.3
+2026-06-07T02:42:05.597519Z	npm warn   node_modules/.pnpm/typescript@5.9.3/node_modules/typescript
+2026-06-07T02:42:05.599734Z	npm warn ERESOLVE overriding peer dependency
+2026-06-07T02:42:05.729661Z	npm warn While resolving: typescript@5.9.3
+2026-06-07T02:42:05.730078Z	npm warn Found: peer eslint@"^8.57.0 || ^9.0.0 || ^10.0.0" from @typescript-eslint/utils@8.60.1
+2026-06-07T02:42:05.730163Z	npm warn node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/node_modules/@typescript-eslint/utils
+2026-06-07T02:42:05.730284Z	npm warn   dev @typescript-eslint/utils@"^8.24.1" from typescript@5.9.3
+2026-06-07T02:42:05.730363Z	npm warn   node_modules/.pnpm/typescript@5.9.3/node_modules/typescript
+2026-06-07T02:42:05.730457Z	npm warn   2 more (@typescript-eslint/rule-tester, @typescript-eslint/type-utils)
+2026-06-07T02:42:05.73054Z	npm warn
+2026-06-07T02:42:05.730599Z	npm warn Could not resolve dependency:
+2026-06-07T02:42:05.730695Z	npm warn peer eslint@"^8.57.0 || ^9.0.0 || ^10.0.0" from @typescript-eslint/utils@8.60.1
+2026-06-07T02:42:05.730907Z	npm warn node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/node_modules/@typescript-eslint/utils
+2026-06-07T02:42:05.731129Z	npm warn   dev @typescript-eslint/utils@"^8.24.1" from typescript@5.9.3
+2026-06-07T02:42:05.731417Z	npm warn   node_modules/.pnpm/typescript@5.9.3/node_modules/typescript
+2026-06-07T02:42:05.731678Z	npm warn   2 more (@typescript-eslint/rule-tester, @typescript-eslint/type-utils)
+2026-06-07T02:42:30.034344Z	npm error Cannot read properties of null (reading 'isDescendantOf')
+2026-06-07T02:42:30.035201Z	npm error A complete log of this run can be found in: /opt/buildhome/.npm/_logs/2026-06-07T02_41_57_488Z-debug-0.log
+2026-06-07T02:42:30.119874Z	Failed: Error while executing user command. Exited with error code: 1
+2026-06-07T02:42:30.130488Z	Failed: build command exited with code: 1
+2026-06-07T02:42:30.941489Z	Failed: error occurred while running build command
