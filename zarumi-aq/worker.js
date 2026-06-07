@@ -26,9 +26,34 @@ export default {
 
     const url  = new URL(request.url);
     if (url.pathname === "/proxy") return handleProxy(url.searchParams, request);
+    if (url.pathname === "/debug") return handleDebug(url.searchParams);
     return handleExtract(url.searchParams);
   },
 };
+
+// ─── Debug ───────────────────────────────────────────────────────────────────
+
+async function handleDebug(params) {
+  const pageUrl = params.get("url");
+  if (!pageUrl) return jsonResponse({ error: "Missing ?url=" }, 400);
+
+  try {
+    const html = await fetchPage(pageUrl);
+    return jsonResponse({
+      url:        pageUrl,
+      html_length: html.length,
+      ajax_url:   extractAjaxUrl(html),
+      post_id:    extractPostId(html),
+      nonce:      extractNonce(html),
+      iframe:     extractIframe(html, SITE_ORIGIN),
+      extracted:  extractFromHtml(html, SITE_ORIGIN),
+      html_start: html.slice(0, 2000),
+      html_end:   html.slice(-500),
+    });
+  } catch (err) {
+    return jsonResponse({ error: err.message, url: pageUrl }, 502);
+  }
+}
 
 // ─── Extrator principal ───────────────────────────────────────────────────────
 
