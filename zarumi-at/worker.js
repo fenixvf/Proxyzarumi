@@ -3,10 +3,10 @@
  * Cloudflare Worker
  *
  * GET /?url=https://www.anitube.zip/HASH/
- *   → Extrai m3u8 e retorna playlist com segmentos reescritos
+ *   → Extrai m3u8 (via api.anivideo.net ?d= param) e retorna playlist reescrita
  *
  * GET /?url=https://cdn-s01.mywallpaper-4k-image.net/stream/.../seg-N.webp
- *   → Faz proxy do segmento CDN (mesmo endpoint, dual-purpose)
+ *   → Proxy do segmento CDN (mesmo endpoint, dual-purpose)
  */
 
 const ANITUBE_ORIGIN  = "https://www.anitube.zip";
@@ -30,20 +30,24 @@ export default {
 
     if (!target) return jsonResponse({ error: "Use ?url=..." }, 400);
 
-    // Se for URL de segmento CDN → proxy direto
+    // URLs de segmento CDN → proxy direto
     if (isCdnUrl(target)) {
       return proxySegment(target, request);
     }
 
-    // Se for página do AniTube → extrai m3u8 e reescreve
+    // Página do AniTube → extrai m3u8 e serve playlist reescrita
     return handleAnitubePage(target, workerUrl);
   },
 };
 
-// ─── Detecta se é URL do CDN de segmentos ────────────────────────────────────
+// ─── Detecta URL de segmento CDN ─────────────────────────────────────────────
 
 function isCdnUrl(url) {
-  return url.includes(CDN_HOST) || url.includes("/stream/") || /\.(webp|ts|m4s|aac|mp4)$/.test(url);
+  return (
+    url.includes(CDN_HOST) ||
+    /\.(ts|m4s|aac|webp)(\?|$)/.test(url) ||
+    (url.includes("/stream/") && !url.includes("anitube.zip"))
+  );
 }
 
 // ─── Scraping da página AniTube ───────────────────────────────────────────────
@@ -51,6 +55,7 @@ function isCdnUrl(url) {
 async function handleAnitubePage(pageUrl, workerUrl) {
   try {
     const m3u8Url = await findM3u8(pageUrl);
+
     if (!m3u8Url) {
       return jsonResponse({ success: false, error: "HLS stream not found", source: pageUrl }, 404);
     }
@@ -61,8 +66,9 @@ async function handleAnitubePage(pageUrl, workerUrl) {
     return new Response(m3u8Content, {
       status: 200,
       headers: {
-        "Content-Type":  "application/vnd.apple.mpegurl",
-        "Cache-Control": "no-store",
+        "Content-Type":    "application/vnd.apple.mpegurl",
+        "Cache-Control":   "no-cache",
+        "x-proxied-url":   m3u8Url,
         ...CORS_HEADERS,
       },
     });
@@ -74,44 +80,52 @@ async function handleAnitubePage(pageUrl, workerUrl) {
 async function findM3u8(pageUrl) {
   const html = await fetchPage(pageUrl);
 
-  // CDN pattern: cdn-s01.mywallpaper-4k-image.net
-  const cdn = html.match(/["'](https?:\/\/[^"'<>\s]*mywallpaper[^"'<>\s]*\.m3u8[^"'<>\s]*)["']/i);
-  if (cdn) return cdn[1];
+  // ── Padrão principal: api.anivideo.net/videohls.php?d=M3U8_URL ──
+  // <iframe src="https://api.anivideo.net/videohls.php?d=https://cdn-s01...m3u8&nocache...">
+  const anivideoMatch = html.match(
+    /api\.anivideo\.net\/videohls\.php\?d=(https?:\/\/[^&"'\s]+\.m3u8[^&"'\s]*)/i
+  );
+  if (anivideoMatch) return decodeURIComponent(anivideoMatch[1]);
 
-  // Qualquer .m3u8
-  const any = html.match(/["'](https?:\/\/[^"'<>\s]+\.m3u8[^"'<>\s]*)["']/i);
-  if (any) return any[1];
+  // ── Fallback: qualquer .m3u8 do CDN no HTML ──
+  const cdnM3u8 = html.match(
+    /["'](https?:\/\/[^"'<>\s]*cdn[^"'<>\s]*\.m3u8[^"'<>\s]*)["']/i
+  );
+  if (cdnM3u8) return cdnM3u8[1];
 
-  // file: "..."
-  const file = html.match(/file\s*:\s*["'](https?:\/\/[^"']+\.m3u8[^"']*)["']/i);
-  if (file) return file[1];
+  // ── Fallback: qualquer .m3u8 ──
+  const anyM3u8 = html.match(/["'](https?:\/\/[^"'<>\s]+\.m3u8[^"'<>\s]*)["']/i);
+  if (anyM3u8) return anyM3u8[1];
 
-  // atob
+  // ── Fallback: atob ──
   const b64 = html.match(/atob\s*\(\s*["']([A-Za-z0-9+/=]{20,})["']\s*\)/);
   if (b64) {
     try {
-      const d = atob(b64[1]);
-      const m = d.match(/https?:\/\/[^\s"'<>]+\.m3u8[^\s"'<>]*/i);
+      const decoded = atob(b64[1]);
+      const m = decoded.match(/https?:\/\/[^\s"'<>]+\.m3u8[^\s"'<>]*/i);
       if (m) return m[0];
     } catch {}
   }
 
-  // Segue iframes
+  // ── Fallback: file: "..." ──
+  const fileProp = html.match(/file\s*:\s*["'](https?:\/\/[^"']+\.m3u8[^"']*)["']/i);
+  if (fileProp) return fileProp[1];
+
+  // ── Fallback: segue iframes ──
   const iframes = [...html.matchAll(/<iframe[^>]+src=["']([^"']+)["']/gi)];
   for (const [, src] of iframes) {
-    const iUrl = src.startsWith("http") ? src : src.startsWith("//") ? "https:" + src : ANITUBE_ORIGIN + src;
+    // Extrai ?d= de qualquer iframe
+    const dParam = src.match(/[?&]d=(https?:\/\/[^&"'\s]+\.m3u8[^&"'\s]*)/i);
+    if (dParam) return decodeURIComponent(dParam[1]);
+
+    // Tenta carregar o iframe para buscar m3u8
     try {
+      const iUrl = src.startsWith("http") ? src
+                 : src.startsWith("//")   ? "https:" + src
+                 : ANITUBE_ORIGIN + src;
       const iHtml = await fetchPage(iUrl, pageUrl);
       const im3u8 = iHtml.match(/["'](https?:\/\/[^"'<>\s]+\.m3u8[^"'<>\s]*)["']/i);
       if (im3u8) return im3u8[1];
-      const ib64 = iHtml.match(/atob\s*\(\s*["']([A-Za-z0-9+/=]{20,})["']\s*\)/);
-      if (ib64) {
-        try {
-          const d = atob(ib64[1]);
-          const m = d.match(/https?:\/\/[^\s"'<>]+\.m3u8[^\s"'<>]*/i);
-          if (m) return m[0];
-        } catch {}
-      }
     } catch {}
   }
 
@@ -143,7 +157,7 @@ async function fetchAndRewriteM3u8(m3u8Url, proxyBase) {
   });
 }
 
-// ─── Proxy de segmentos CDN ───────────────────────────────────────────────────
+// ─── Proxy de segmentos ───────────────────────────────────────────────────────
 
 async function proxySegment(target, request) {
   const headers = {
@@ -171,7 +185,9 @@ async function proxySegment(target, request) {
     const rw = text.replace(/^(?!#)(.+)$/gm, (line) => {
       line = line.trim();
       if (!line) return line;
-      const abs = line.startsWith("http") ? line : line.startsWith("//") ? "https:" + line : baseUrl + line;
+      const abs = line.startsWith("http") ? line
+                : line.startsWith("//")   ? "https:" + line
+                : baseUrl + line;
       return `${pBase}${encodeURIComponent(abs)}`;
     });
     resHeaders.set("Content-Type", "application/vnd.apple.mpegurl");
@@ -198,7 +214,6 @@ async function fetchPage(url, referer = ANITUBE_REFERER) {
       "sec-ch-ua-platform":        '"Windows"',
       "sec-fetch-dest":            "document",
       "sec-fetch-mode":            "navigate",
-      "sec-fetch-site":            "same-origin",
     },
     redirect: "follow",
   });

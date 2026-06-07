@@ -4,8 +4,8 @@
  *
  * GET /?url=https://animeq.net/episodio/SLUG-episodio-01
  * GET /?url=https://animeq.net/filme/SLUG/
- * Retorna JSON estruturado:
- * { success, title, site, postId, type, results: [{ label, type, url, proxyUrl }] }
+ * Retorna JSON:
+ * { success, title, site, postId, type, results: [{ label, type, url, option, isBlogger, resolveUrl, proxyUrl }] }
  *
  * GET /?proxy=https://aniplay.online/...mp4
  * → Faz proxy do arquivo de vídeo com Referer do AnimeQ
@@ -13,6 +13,7 @@
 
 const SITE_ORIGIN  = "https://animeq.net";
 const SITE_REFERER = "https://animeq.net/";
+const AJAX_URL     = "https://animeq.net/wp-admin/admin-ajax.php";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin":   "*",
@@ -29,13 +30,13 @@ export default {
     const workerUrl = new URL(request.url);
     const proxy     = workerUrl.searchParams.get("proxy");
     const pageUrl   = workerUrl.searchParams.get("url");
-    const debugUrl  = workerUrl.pathname === "/debug" ? workerUrl.searchParams.get("url") : null;
+    const debugPath = workerUrl.pathname === "/debug";
 
-    if (proxy)    return handleProxy(proxy, request);
-    if (debugUrl) return handleDebug(debugUrl, workerUrl);
-    if (pageUrl)  return handleExtract(pageUrl, workerUrl);
+    if (proxy)             return handleProxy(proxy, request);
+    if (pageUrl && debugPath) return handleDebug(pageUrl, workerUrl);
+    if (pageUrl)           return handleExtract(pageUrl, workerUrl);
 
-    return jsonResponse({ error: "Use ?url=PAGE ou ?proxy=VIDEO_URL" }, 400);
+    return jsonResponse({ error: "Use ?url=PAGE_URL ou ?proxy=VIDEO_URL" }, 400);
   },
 };
 
@@ -43,28 +44,32 @@ export default {
 
 async function handleExtract(pageUrl, workerUrl) {
   try {
-    const html  = await fetchPage(pageUrl);
-    const meta  = extractMeta(html, pageUrl);
-    const ajax  = await tryDooplayAjax(html, pageUrl, workerUrl);
+    // Busca página e captura cookies da resposta
+    const { html, cookies } = await fetchPageWithCookies(pageUrl);
+    const meta              = extractMeta(html, pageUrl);
 
-    if (ajax && ajax.length > 0) {
-      return jsonResponse({ success: true, ...meta, results: ajax });
-    }
+    // 1. Tenta DooPlay AJAX com os cookies da resposta
+    const ajaxResults = await tryDooplayAjax(html, pageUrl, cookies, workerUrl);
+    if (ajaxResults && ajaxResults.length > 0)
+      return jsonResponse({ success: true, ...meta, results: ajaxResults });
 
-    // Fallback: extração direta do HTML
-    const direct = extractDirectFromHtml(html, SITE_ORIGIN, workerUrl);
-    if (direct.length > 0) {
+    // 2. Tenta WP REST API com nonce
+    const restResults = await tryWpRestApi(html, pageUrl, cookies, workerUrl);
+    if (restResults && restResults.length > 0)
+      return jsonResponse({ success: true, ...meta, results: restResults });
+
+    // 3. Extração direta do HTML
+    const direct = extractDirectFromHtml(html, workerUrl);
+    if (direct.length > 0)
       return jsonResponse({ success: true, ...meta, results: direct });
-    }
 
-    // Fallback: segue iframe
-    const iframeUrl = extractIframe(html, SITE_ORIGIN);
-    if (iframeUrl && iframeUrl !== pageUrl) {
-      const iHtml   = await fetchPage(iframeUrl, pageUrl);
-      const iDirect = extractDirectFromHtml(iHtml, iframeUrl, workerUrl);
-      if (iDirect.length > 0) {
+    // 4. Segue iframes
+    const iframeUrls = extractAllIframes(html);
+    for (const iUrl of iframeUrls.slice(0, 3)) {
+      const { html: iHtml } = await fetchPageWithCookies(iUrl, pageUrl).catch(() => ({ html: "" }));
+      const iDirect = extractDirectFromHtml(iHtml, workerUrl);
+      if (iDirect.length > 0)
         return jsonResponse({ success: true, ...meta, results: iDirect });
-      }
     }
 
     return jsonResponse({ success: false, error: "Video not found", source: pageUrl }, 404);
@@ -76,90 +81,154 @@ async function handleExtract(pageUrl, workerUrl) {
 // ─── Metadados da página ──────────────────────────────────────────────────────
 
 function extractMeta(html, pageUrl) {
-  const title   = html.match(/<title>([^<]+)<\/title>/i)?.[1]?.replace(/ – AnimeQ.*/, "").trim() || "";
-  const postId  = extractPostId(html) || "";
-  const isFilme = pageUrl.includes("/filme/") || pageUrl.includes("/movie/");
-  return { title, site: SITE_ORIGIN, postId, type: isFilme ? "movie" : "serie" };
+  const title  = html.match(/<title>([^<]+)<\/title>/i)?.[1]
+                    ?.replace(/ [–\-|]+ AnimeQ.*/i, "")
+                    ?.trim() || "";
+  const postId = extractPostId(html) || "";
+  const isFilm = pageUrl.includes("/filme/") || pageUrl.includes("/movie/");
+  return { title, site: SITE_ORIGIN, postId, type: isFilm ? "movie" : "serie" };
 }
 
 // ─── DooPlay AJAX ─────────────────────────────────────────────────────────────
 
-async function tryDooplayAjax(html, referer, workerUrl) {
-  const ajaxUrl = extractAjaxUrl(html);
+async function tryDooplayAjax(html, pageUrl, cookies, workerUrl) {
   const postId  = extractPostId(html);
   const nonce   = extractNonce(html);
+  const isFilm  = pageUrl.includes("/filme/") || pageUrl.includes("/movie/");
+  const type    = isFilm ? "movie" : "serie";
 
-  if (!ajaxUrl || !postId || !nonce) return null;
+  if (!postId || !nonce) return null;
 
-  const actions = ["dooplay_ajax_player", "dooplay_player_ajax", "TWP", "doo_player_ajax"];
+  // Opções de fonte: 1, 2, 3 + trailer
+  const numes   = ["1", "2", "3", "4", "trailer"];
+  const actions = ["dooplay_ajax_player", "dooplay_player_ajax", "doo_player_ajax", "TWP"];
+
+  const cookieHeader = buildCookieHeader(cookies);
+  const results      = [];
 
   for (const action of actions) {
-    try {
-      const body = new URLSearchParams({ action, postID: postId, nonce });
-      const res  = await fetch(ajaxUrl, {
-        method: "POST",
-        headers: {
+    for (const nume of numes) {
+      try {
+        const body = new URLSearchParams({
+          action,
+          postID: postId,
+          type,
+          nume,
+          nonce,
+        });
+
+        const headers = {
           "Content-Type":     "application/x-www-form-urlencoded; charset=UTF-8",
           "User-Agent":       UA,
           "Accept":           "application/json, text/javascript, */*; q=0.01",
           "X-Requested-With": "XMLHttpRequest",
-          "Referer":          referer,
+          "Referer":          pageUrl,
           "Origin":           SITE_ORIGIN,
-        },
-        body: body.toString(),
-      });
+        };
+        if (cookieHeader) headers["Cookie"] = cookieHeader;
 
-      const text = await res.text();
-      if (!text || text === "0" || text === "-1") continue;
+        const res  = await fetch(AJAX_URL, { method: "POST", headers, body: body.toString() });
+        const text = await res.text();
 
-      let data;
-      try { data = JSON.parse(text); } catch { continue; }
+        if (!text || text === "0" || text === "-1" || text === "false") continue;
 
-      // Resposta pode ter embed, data, html, ou array de sources
-      const embedHtml = data.embed || data.data || data.html || data.result || "";
+        let data;
+        try { data = JSON.parse(text); } catch {
+          // Resposta pode ser HTML puro
+          const extracted = await parseEmbedForResults(text, pageUrl, workerUrl);
+          if (extracted.length > 0) return extracted;
+          continue;
+        }
 
-      if (embedHtml) {
-        const results = await parseEmbedForResults(embedHtml, referer, workerUrl);
+        const embedHtml = data.embed || data.data || data.html || data.result || "";
+        if (embedHtml) {
+          const parsed = await parseEmbedForResults(embedHtml, pageUrl, workerUrl);
+          results.push(...parsed);
+        }
+
+        if (Array.isArray(data.sources)) {
+          data.sources.forEach((s, i) =>
+            results.push(buildResult(s.file || s.url, s.label || `Opção ${i+1}`, s.type, workerUrl)));
+        }
+
         if (results.length > 0) return results;
-      }
+      } catch {}
+    }
+    if (results.length > 0) break;
+  }
 
-      // Alguns DooPlay retornam array de sources direto
-      if (Array.isArray(data.sources)) {
-        return data.sources.map((s, i) => buildResult(s.file || s.url, s.label || `Opção ${i+1}`, s.type, workerUrl));
-      }
+  return results.length ? results : null;
+}
 
+// ─── WP REST API (wp_json mode) ───────────────────────────────────────────────
+
+async function tryWpRestApi(html, pageUrl, cookies, workerUrl) {
+  const playerApi = html.match(/"player_api"\s*:\s*"([^"]+)"/i)?.[1];
+  const postId    = extractPostId(html);
+  const nonce     = extractNonce(html);  // dtGonza.nonce é o REST nonce
+  const isFilm    = pageUrl.includes("/filme/") || pageUrl.includes("/movie/");
+  const type      = isFilm ? "movie" : "serie";
+
+  if (!postId || !nonce || !playerApi) return null;
+
+  const cookieHeader = buildCookieHeader(cookies);
+  const results      = [];
+
+  for (const source of ["1", "2", "3"]) {
+    try {
+      const apiUrl = `${playerApi.replace(/\/$/, "")}/${postId}?type=${type}&source=${source}&nonce=${nonce}`;
+      const headers = {
+        "User-Agent":   UA,
+        "Accept":       "application/json",
+        "Referer":      pageUrl,
+        "Origin":       SITE_ORIGIN,
+        "X-WP-Nonce":  nonce,
+      };
+      if (cookieHeader) headers["Cookie"] = cookieHeader;
+
+      const res  = await fetch(apiUrl, { headers });
+      if (!res.ok) continue;
+      const data = await res.json().catch(() => null);
+      if (!data) continue;
+
+      // Resposta DooPlay v2: { embed_url, type, ... }
+      const url = data.embed_url || data.url || data.file || "";
+      if (!url) continue;
+
+      const vType = url.includes(".m3u8") ? "hls" : url.includes(".mp4") ? "mp4" : "iframe";
+      results.push(buildResult(url, `Opção ${source}`, vType, workerUrl));
     } catch {}
   }
 
-  return null;
+  return results.length ? results : null;
 }
+
+// ─── Parse do embed HTML ──────────────────────────────────────────────────────
 
 async function parseEmbedForResults(embedHtml, referer, workerUrl) {
   const results = [];
 
-  // URLs mp4 diretas no embed
   const mp4s = [...embedHtml.matchAll(/https?:\/\/[^\s"'<>]+\.mp4[^\s"'<>]*/gi)];
-  for (const [url] of mp4s) {
-    results.push(buildResult(url, `Opção ${results.length + 1} (MP4 Direto)`, "mp4", workerUrl));
-  }
+  for (const [url] of mp4s)
+    if (!results.find(r => r.url === url))
+      results.push(buildResult(url, `Opção ${results.length + 1} (MP4 Direto)`, "mp4", workerUrl));
 
-  // m3u8
   const m3u8s = [...embedHtml.matchAll(/["'](https?:\/\/[^"'<>\s]+\.m3u8[^"'<>\s]*)["']/gi)];
-  for (const [, url] of m3u8s) {
-    results.push(buildResult(url, `Opção ${results.length + 1} (HLS)`, "hls", workerUrl));
-  }
+  for (const [, url] of m3u8s)
+    if (!results.find(r => r.url === url))
+      results.push(buildResult(url, `Opção ${results.length + 1} (HLS)`, "hls", workerUrl));
 
-  // iframes dentro do embed
   const iframes = [...embedHtml.matchAll(/<iframe[^>]+src=["']([^"']+)["']/gi)];
-  for (const [, src] of iframes) {
+  for (const [, src] of iframes.slice(0, 3)) {
     const iUrl = src.startsWith("http") ? src : src.startsWith("//") ? "https:" + src : SITE_ORIGIN + src;
+    if (results.find(r => r.url === iUrl)) continue;
     try {
-      const iHtml = await fetchPage(iUrl, referer);
-      const mp4   = iHtml.match(/https?:\/\/[^\s"'<>]+\.mp4[^\s"'<>]*/i);
-      const m3u8  = iHtml.match(/["'](https?:\/\/[^"'<>\s]+\.m3u8[^"'<>\s]*)["']/i);
-      if (mp4)  results.push(buildResult(mp4[0], `Opção ${results.length + 1} (MP4)`, "mp4", workerUrl));
-      if (m3u8) results.push(buildResult(m3u8[1], `Opção ${results.length + 1} (HLS)`, "hls", workerUrl));
-      if (!mp4 && !m3u8) results.push(buildResult(iUrl, `Opção ${results.length + 1}`, "iframe", workerUrl));
+      const { html: iHtml } = await fetchPageWithCookies(iUrl, referer);
+      const mp4  = iHtml.match(/https?:\/\/[^\s"'<>]+\.mp4[^\s"'<>]*/i);
+      const m3u8 = iHtml.match(/["'](https?:\/\/[^"'<>\s]+\.m3u8[^"'<>\s]*)["']/i);
+      if (mp4)        results.push(buildResult(mp4[0], `Opção ${results.length + 1} (MP4)`, "mp4", workerUrl));
+      else if (m3u8)  results.push(buildResult(m3u8[1], `Opção ${results.length + 1} (HLS)`, "hls", workerUrl));
+      else            results.push(buildResult(iUrl, `Opção ${results.length + 1}`, "iframe", workerUrl));
     } catch {
       results.push(buildResult(iUrl, `Opção ${results.length + 1}`, "iframe", workerUrl));
     }
@@ -168,27 +237,20 @@ async function parseEmbedForResults(embedHtml, referer, workerUrl) {
   return results;
 }
 
-function buildResult(url, label, type, workerUrl) {
-  const proxyUrl = `${workerUrl.origin}/?proxy=${encodeURIComponent(url)}`;
-  return { label, type: type || "mp4", url, proxyUrl };
-}
+// ─── Extração direta do HTML da página ───────────────────────────────────────
 
-// ─── Extração direta do HTML ──────────────────────────────────────────────────
-
-function extractDirectFromHtml(html, base, workerUrl) {
+function extractDirectFromHtml(html, workerUrl) {
   const results = [];
 
   const mp4s = [...html.matchAll(/https?:\/\/[^\s"'<>]+\.mp4[^\s"'<>]*/gi)];
-  for (const [url] of mp4s) {
+  for (const [url] of mp4s)
     if (!results.find(r => r.url === url))
       results.push(buildResult(url, `Opção ${results.length + 1} (MP4 Direto)`, "mp4", workerUrl));
-  }
 
   const m3u8s = [...html.matchAll(/["'](https?:\/\/[^"'<>\s]+\.m3u8[^"'<>\s]*)["']/gi)];
-  for (const [, url] of m3u8s) {
+  for (const [, url] of m3u8s)
     if (!results.find(r => r.url === url))
       results.push(buildResult(url, `Opção ${results.length + 1} (HLS)`, "hls", workerUrl));
-  }
 
   return results;
 }
@@ -197,16 +259,18 @@ function extractDirectFromHtml(html, base, workerUrl) {
 
 async function handleDebug(pageUrl, workerUrl) {
   try {
-    const html = await fetchPage(pageUrl);
+    const { html, cookies } = await fetchPageWithCookies(pageUrl);
     return jsonResponse({
-      url:        pageUrl,
+      url:         pageUrl,
       html_length: html.length,
-      ajax_url:   extractAjaxUrl(html),
-      post_id:    extractPostId(html),
-      nonce:      extractNonce(html),
-      iframe:     extractIframe(html, SITE_ORIGIN),
-      direct:     extractDirectFromHtml(html, SITE_ORIGIN, workerUrl),
-      html_start: html.slice(0, 3000),
+      post_id:     extractPostId(html),
+      nonce:       extractNonce(html),
+      player_api:  html.match(/"player_api"\s*:\s*"([^"]+)"/i)?.[1] || null,
+      play_method: html.match(/"play_method"\s*:\s*"([^"]+)"/i)?.[1] || null,
+      cookies_received: Object.keys(cookies),
+      iframes:     extractAllIframes(html).slice(0, 5),
+      direct:      extractDirectFromHtml(html, workerUrl),
+      html_start:  html.slice(0, 3000),
     });
   } catch (err) {
     return jsonResponse({ error: err.message, url: pageUrl }, 502);
@@ -232,64 +296,71 @@ async function handleProxy(target, request) {
   return new Response(res.body, { status: res.status, headers: resHeaders });
 }
 
-// ─── Helpers HTML ─────────────────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function extractIframe(html, base) {
-  const m = html.match(/<iframe[^>]+src=["']([^"']+)["']/i);
-  if (!m) return null;
-  const s = m[1];
-  return s.startsWith("http") ? s : s.startsWith("//") ? "https:" + s : base + s;
+function buildResult(url, label, type, workerUrl) {
+  const vType    = type || (url.includes(".m3u8") ? "hls" : "mp4");
+  const proxyUrl = `${workerUrl.origin}/?proxy=${encodeURIComponent(url)}`;
+  return { label, type: vType, url, option: null, isBlogger: false, resolveUrl: null, proxyUrl };
 }
 
-function extractAjaxUrl(html) {
-  const m = html.match(/["']ajaxurl["']\s*:\s*["']([^"']+)["']/i)
-         || html.match(/var\s+ajaxurl\s*=\s*["']([^"']+)["']/i);
-  return m ? dec(m[1]) : null;
+function extractAllIframes(html) {
+  return [...html.matchAll(/<iframe[^>]+src=["']([^"']+)["']/gi)]
+    .map(([, s]) => s.startsWith("http") ? s : s.startsWith("//") ? "https:" + s : SITE_ORIGIN + s);
 }
 
 function extractPostId(html) {
-  const m = html.match(/["']post_?[Ii][Dd]["']\s*:\s*["']?(\d+)/i)
-         || html.match(/postID\s*=\s*["']?(\d+)/i)
-         || html.match(/data-post(?:-id)?\s*=\s*["']?(\d+)/i);
-  return m ? m[1] : null;
+  return html.match(/data-post(?:-id)?\s*=\s*["']?(\d+)/i)?.[1]
+      || html.match(/["']post_?[Ii][Dd]["']\s*:\s*["']?(\d+)/i)?.[1]
+      || html.match(/postID\s*[=:]\s*["']?(\d+)/i)?.[1];
 }
 
 function extractNonce(html) {
-  const m = html.match(/["']nonce["']\s*:\s*["']([a-f0-9]{10,})["']/i)
-         || html.match(/data-nonce\s*=\s*["']([a-f0-9]{10,})["']/i);
-  return m ? m[1] : null;
+  // Prefere o nonce do dtGonza (REST nonce) ou dtAjax
+  const all = [...html.matchAll(/["']nonce["']\s*:\s*["']([a-f0-9]{8,12})["']/gi)];
+  return all[0]?.[1] || null;
 }
 
-// ─── Helpers gerais ───────────────────────────────────────────────────────────
+function buildCookieHeader(cookies) {
+  const entries = Object.entries(cookies)
+    .filter(([, v]) => v)
+    .map(([k, v]) => `${k}=${v}`);
+  if (entries.length === 0) return null;
+  return entries.join("; ");
+}
 
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
-async function fetchPage(url, referer = SITE_REFERER) {
+async function fetchPageWithCookies(url, referer = SITE_REFERER) {
   const res = await fetch(url, {
     headers: {
       "User-Agent":                UA,
       "Accept":                    "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
       "Accept-Language":           "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
       "Referer":                   referer,
-      "Origin":                    SITE_ORIGIN,
       "Upgrade-Insecure-Requests": "1",
-      "Cache-Control":             "max-age=0",
       "sec-ch-ua":                 '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
       "sec-ch-ua-mobile":          "?0",
       "sec-ch-ua-platform":        '"Windows"',
       "sec-fetch-dest":            "document",
       "sec-fetch-mode":            "navigate",
-      "sec-fetch-site":            "same-origin",
-      "sec-fetch-user":            "?1",
+      "sec-fetch-site":            referer.includes(url.split("/")[2]) ? "same-origin" : "cross-site",
     },
     redirect: "follow",
   });
   if (!res.ok) throw new Error(`HTTP ${res.status} → ${url}`);
-  return res.text();
-}
 
-function dec(s) {
-  return s.replace(/&amp;/g, "&").replace(/&#038;/g, "&").replace(/\\u0026/g, "&");
+  // Captura cookies da resposta para usar em chamadas subsequentes
+  const cookies = {};
+  for (const [key, val] of res.headers.entries()) {
+    if (key.toLowerCase() === "set-cookie") {
+      const name = val.split("=")[0].trim();
+      const value = val.split("=")[1]?.split(";")[0]?.trim() || "";
+      if (name) cookies[name] = value;
+    }
+  }
+
+  return { html: await res.text(), cookies };
 }
 
 function jsonResponse(data, status = 200) {

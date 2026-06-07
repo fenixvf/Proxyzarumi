@@ -1,9 +1,9 @@
 /**
  * Zarumi Proxy Worker — Service Worker format
- * Usa extratores externos como backend:
- *   AnimeQ  → aq.masterotaku487.workers.dev
- *   AniTube → at.masterotaku487.workers.dev (retorna HLS)
- *   AnimésDrive → extração direta via HTML (DooPlay AJAX)
+ * Usa extratores próprios como backend:
+ *   AnimeQ      → zarumi-aq.zarumi.workers.dev
+ *   AniTube     → zarumi-at.zarumi.workers.dev (retorna HLS)
+ *   AnimésDrive → zarumi-drivea.zarumi.workers.dev
  */
 
 const ALLOWED_ORIGINS = [
