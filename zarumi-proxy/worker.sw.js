@@ -268,7 +268,17 @@ function toSlug(title) {
 
 async function extractVideoUrl(pageUrl) {
   const html = await fetchPage(pageUrl);
+  const found = extractFromHtml(html, pageUrl);
+  if (found) return found;
 
+  // Tenta variante ?trembed=1 (padrão WordPress de anime BR)
+  const trembed = await tryTrembed(pageUrl);
+  if (trembed) return trembed;
+
+  return null;
+}
+
+function extractFromHtml(html, baseUrl) {
   const sourceTag = html.match(/<source[^>]+src=["']([^"']+\.mp4[^"']*)/i);
   if (sourceTag) return decodeHtmlEntities(sourceTag[1]);
 
@@ -278,17 +288,53 @@ async function extractVideoUrl(pageUrl) {
   const jsonSrc = html.match(/"src"\s*:\s*"([^"]+\.mp4[^"]*)"/i);
   if (jsonSrc) return decodeHtmlEntities(jsonSrc[1]);
 
-  const iframeSrc = html.match(/<iframe[^>]+src=["']([^"']+)["']/i);
-  if (iframeSrc) {
-    const iframeUrl = iframeSrc[1].startsWith("http")
-      ? iframeSrc[1]
-      : new URL(iframeSrc[1], pageUrl).href;
-    return await extractVideoUrl(iframeUrl);
+  // PlayerJS: player.init({file:"..."})
+  const playerInit = html.match(/player\.init\s*\(\s*\{[^}]*file\s*:\s*["']([^"']+)/i);
+  if (playerInit) return decodeHtmlEntities(playerInit[1]);
+
+  // base64 encoded src
+  const b64 = html.match(/atob\s*\(\s*["']([A-Za-z0-9+/=]{20,})["']\s*\)/);
+  if (b64) {
+    try {
+      const decoded = atob(b64[1]);
+      const mp4 = decoded.match(/https?:\/\/[^\s"'<>]+\.mp4[^\s"'<>]*/i);
+      if (mp4) return mp4[0];
+    } catch {}
   }
 
   const anyMp4 = html.match(/https?:\/\/[^\s"'<>]+\.mp4[^\s"'<>]*/i);
   if (anyMp4) return anyMp4[0];
 
+  return null;
+}
+
+async function tryTrembed(pageUrl) {
+  const sep = pageUrl.includes("?") ? "&" : "?";
+  const variants = [
+    `${pageUrl}${sep}trembed=1`,
+    `${pageUrl}${sep}iframe=1`,
+    `${pageUrl}${sep}embed=1`,
+  ];
+
+  for (const url of variants) {
+    try {
+      const html = await fetchPage(url);
+
+      const found = extractFromHtml(html, url);
+      if (found) return found;
+
+      // Procura iframes dentro do trembed
+      const iframeSrc = html.match(/<iframe[^>]+src=["']([^"']+)["']/i);
+      if (iframeSrc) {
+        const iframeUrl = iframeSrc[1].startsWith("http")
+          ? iframeSrc[1]
+          : new URL(iframeSrc[1], url).href;
+        const inner = await fetchPage(iframeUrl);
+        const innerFound = extractFromHtml(inner, iframeUrl);
+        if (innerFound) return innerFound;
+      }
+    } catch {}
+  }
   return null;
 }
 
