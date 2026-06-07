@@ -216,15 +216,32 @@ const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
 async function fetchPage(url, referer = SITE_REFERER) {
   const res = await fetch(url, {
     headers: {
-      "User-Agent":      UA,
-      "Accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-      "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8",
-      "Referer":         referer,
+      "User-Agent":                UA,
+      "Accept":                    "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+      "Accept-Language":           "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
+      "Accept-Encoding":           "gzip, deflate, br",
+      "Referer":                   referer,
+      "Origin":                    SITE_ORIGIN,
+      "Upgrade-Insecure-Requests": "1",
+      "Cache-Control":             "max-age=0",
+      "Connection":                "keep-alive",
+      "sec-ch-ua":                 '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+      "sec-ch-ua-mobile":          "?0",
+      "sec-ch-ua-platform":        '"Windows"',
+      "sec-fetch-dest":            "document",
+      "sec-fetch-mode":            "navigate",
+      "sec-fetch-site":            "same-origin",
+      "sec-fetch-user":            "?1",
+      "DNT":                       "1",
     },
     redirect: "follow",
   });
   if (!res.ok) throw new Error(`HTTP ${res.status} → ${url}`);
-  return res.text();
+  const text = await res.text();
+  if (text.includes("error code:") || text.includes("Checking your browser") || text.includes("cf-browser-verification")) {
+    throw new Error(`Cloudflare bloqueou: ${text.slice(0, 100)}`);
+  }
+  return text;
 }
 
 function decodeEntities(str) {
