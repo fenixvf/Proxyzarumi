@@ -210,7 +210,14 @@ async function handleDebug(params) {
     setup_call:  (html.match(/setup\s*\(\s*\{[^}]{0,300}/gi) || []).slice(0, 3),
   };
 
-  return corsResponse(JSON.stringify({ url: pageUrl, html_length: len, patterns }, null, 2), 200);
+  return corsResponse(JSON.stringify({
+    url: pageUrl,
+    html_length: len,
+    patterns,
+    html_start: html.slice(0, 2000),
+    html_mid:   html.slice(Math.floor(len / 2) - 1000, Math.floor(len / 2) + 1000),
+    html_end:   html.slice(-2000),
+  }, null, 2), 200);
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
