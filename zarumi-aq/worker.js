@@ -1,12 +1,14 @@
 /**
- * zarumi-aq — Extrator AnimeQ
+ * zarumi-aq — AnimeQ extractor + proxy
  * Cloudflare Worker
  *
  * GET /?url=https://animeq.net/episodio/SLUG-episodio-01
  * GET /?url=https://animeq.net/filme/SLUG/
- * Retorna JSON: { success, url, type, source }
+ * Retorna JSON estruturado:
+ * { success, title, site, postId, type, results: [{ label, type, url, proxyUrl }] }
  *
- * GET /proxy?url=https://... → proxy transparente
+ * GET /?proxy=https://aniplay.online/...mp4
+ * → Faz proxy do arquivo de vídeo com Referer do AnimeQ
  */
 
 const SITE_ORIGIN  = "https://animeq.net";
@@ -24,19 +26,176 @@ export default {
     if (request.method === "OPTIONS")
       return new Response(null, { status: 204, headers: CORS_HEADERS });
 
-    const url  = new URL(request.url);
-    if (url.pathname === "/proxy") return handleProxy(url.searchParams, request);
-    if (url.pathname === "/debug") return handleDebug(url.searchParams);
-    return handleExtract(url.searchParams);
+    const workerUrl = new URL(request.url);
+    const proxy     = workerUrl.searchParams.get("proxy");
+    const pageUrl   = workerUrl.searchParams.get("url");
+    const debugUrl  = workerUrl.pathname === "/debug" ? workerUrl.searchParams.get("url") : null;
+
+    if (proxy)    return handleProxy(proxy, request);
+    if (debugUrl) return handleDebug(debugUrl, workerUrl);
+    if (pageUrl)  return handleExtract(pageUrl, workerUrl);
+
+    return jsonResponse({ error: "Use ?url=PAGE ou ?proxy=VIDEO_URL" }, 400);
   },
 };
 
-// ─── Debug ───────────────────────────────────────────────────────────────────
+// ─── Extrator principal ───────────────────────────────────────────────────────
 
-async function handleDebug(params) {
-  const pageUrl = params.get("url");
-  if (!pageUrl) return jsonResponse({ error: "Missing ?url=" }, 400);
+async function handleExtract(pageUrl, workerUrl) {
+  try {
+    const html  = await fetchPage(pageUrl);
+    const meta  = extractMeta(html, pageUrl);
+    const ajax  = await tryDooplayAjax(html, pageUrl, workerUrl);
 
+    if (ajax && ajax.length > 0) {
+      return jsonResponse({ success: true, ...meta, results: ajax });
+    }
+
+    // Fallback: extração direta do HTML
+    const direct = extractDirectFromHtml(html, SITE_ORIGIN, workerUrl);
+    if (direct.length > 0) {
+      return jsonResponse({ success: true, ...meta, results: direct });
+    }
+
+    // Fallback: segue iframe
+    const iframeUrl = extractIframe(html, SITE_ORIGIN);
+    if (iframeUrl && iframeUrl !== pageUrl) {
+      const iHtml   = await fetchPage(iframeUrl, pageUrl);
+      const iDirect = extractDirectFromHtml(iHtml, iframeUrl, workerUrl);
+      if (iDirect.length > 0) {
+        return jsonResponse({ success: true, ...meta, results: iDirect });
+      }
+    }
+
+    return jsonResponse({ success: false, error: "Video not found", source: pageUrl }, 404);
+  } catch (err) {
+    return jsonResponse({ success: false, error: err.message, source: pageUrl }, 502);
+  }
+}
+
+// ─── Metadados da página ──────────────────────────────────────────────────────
+
+function extractMeta(html, pageUrl) {
+  const title   = html.match(/<title>([^<]+)<\/title>/i)?.[1]?.replace(/ – AnimeQ.*/, "").trim() || "";
+  const postId  = extractPostId(html) || "";
+  const isFilme = pageUrl.includes("/filme/") || pageUrl.includes("/movie/");
+  return { title, site: SITE_ORIGIN, postId, type: isFilme ? "movie" : "serie" };
+}
+
+// ─── DooPlay AJAX ─────────────────────────────────────────────────────────────
+
+async function tryDooplayAjax(html, referer, workerUrl) {
+  const ajaxUrl = extractAjaxUrl(html);
+  const postId  = extractPostId(html);
+  const nonce   = extractNonce(html);
+
+  if (!ajaxUrl || !postId || !nonce) return null;
+
+  const actions = ["dooplay_ajax_player", "dooplay_player_ajax", "TWP", "doo_player_ajax"];
+
+  for (const action of actions) {
+    try {
+      const body = new URLSearchParams({ action, postID: postId, nonce });
+      const res  = await fetch(ajaxUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type":     "application/x-www-form-urlencoded; charset=UTF-8",
+          "User-Agent":       UA,
+          "Accept":           "application/json, text/javascript, */*; q=0.01",
+          "X-Requested-With": "XMLHttpRequest",
+          "Referer":          referer,
+          "Origin":           SITE_ORIGIN,
+        },
+        body: body.toString(),
+      });
+
+      const text = await res.text();
+      if (!text || text === "0" || text === "-1") continue;
+
+      let data;
+      try { data = JSON.parse(text); } catch { continue; }
+
+      // Resposta pode ter embed, data, html, ou array de sources
+      const embedHtml = data.embed || data.data || data.html || data.result || "";
+
+      if (embedHtml) {
+        const results = await parseEmbedForResults(embedHtml, referer, workerUrl);
+        if (results.length > 0) return results;
+      }
+
+      // Alguns DooPlay retornam array de sources direto
+      if (Array.isArray(data.sources)) {
+        return data.sources.map((s, i) => buildResult(s.file || s.url, s.label || `Opção ${i+1}`, s.type, workerUrl));
+      }
+
+    } catch {}
+  }
+
+  return null;
+}
+
+async function parseEmbedForResults(embedHtml, referer, workerUrl) {
+  const results = [];
+
+  // URLs mp4 diretas no embed
+  const mp4s = [...embedHtml.matchAll(/https?:\/\/[^\s"'<>]+\.mp4[^\s"'<>]*/gi)];
+  for (const [url] of mp4s) {
+    results.push(buildResult(url, `Opção ${results.length + 1} (MP4 Direto)`, "mp4", workerUrl));
+  }
+
+  // m3u8
+  const m3u8s = [...embedHtml.matchAll(/["'](https?:\/\/[^"'<>\s]+\.m3u8[^"'<>\s]*)["']/gi)];
+  for (const [, url] of m3u8s) {
+    results.push(buildResult(url, `Opção ${results.length + 1} (HLS)`, "hls", workerUrl));
+  }
+
+  // iframes dentro do embed
+  const iframes = [...embedHtml.matchAll(/<iframe[^>]+src=["']([^"']+)["']/gi)];
+  for (const [, src] of iframes) {
+    const iUrl = src.startsWith("http") ? src : src.startsWith("//") ? "https:" + src : SITE_ORIGIN + src;
+    try {
+      const iHtml = await fetchPage(iUrl, referer);
+      const mp4   = iHtml.match(/https?:\/\/[^\s"'<>]+\.mp4[^\s"'<>]*/i);
+      const m3u8  = iHtml.match(/["'](https?:\/\/[^"'<>\s]+\.m3u8[^"'<>\s]*)["']/i);
+      if (mp4)  results.push(buildResult(mp4[0], `Opção ${results.length + 1} (MP4)`, "mp4", workerUrl));
+      if (m3u8) results.push(buildResult(m3u8[1], `Opção ${results.length + 1} (HLS)`, "hls", workerUrl));
+      if (!mp4 && !m3u8) results.push(buildResult(iUrl, `Opção ${results.length + 1}`, "iframe", workerUrl));
+    } catch {
+      results.push(buildResult(iUrl, `Opção ${results.length + 1}`, "iframe", workerUrl));
+    }
+  }
+
+  return results;
+}
+
+function buildResult(url, label, type, workerUrl) {
+  const proxyUrl = `${workerUrl.origin}/?proxy=${encodeURIComponent(url)}`;
+  return { label, type: type || "mp4", url, proxyUrl };
+}
+
+// ─── Extração direta do HTML ──────────────────────────────────────────────────
+
+function extractDirectFromHtml(html, base, workerUrl) {
+  const results = [];
+
+  const mp4s = [...html.matchAll(/https?:\/\/[^\s"'<>]+\.mp4[^\s"'<>]*/gi)];
+  for (const [url] of mp4s) {
+    if (!results.find(r => r.url === url))
+      results.push(buildResult(url, `Opção ${results.length + 1} (MP4 Direto)`, "mp4", workerUrl));
+  }
+
+  const m3u8s = [...html.matchAll(/["'](https?:\/\/[^"'<>\s]+\.m3u8[^"'<>\s]*)["']/gi)];
+  for (const [, url] of m3u8s) {
+    if (!results.find(r => r.url === url))
+      results.push(buildResult(url, `Opção ${results.length + 1} (HLS)`, "hls", workerUrl));
+  }
+
+  return results;
+}
+
+// ─── Debug ────────────────────────────────────────────────────────────────────
+
+async function handleDebug(pageUrl, workerUrl) {
   try {
     const html = await fetchPage(pageUrl);
     return jsonResponse({
@@ -46,130 +205,34 @@ async function handleDebug(params) {
       post_id:    extractPostId(html),
       nonce:      extractNonce(html),
       iframe:     extractIframe(html, SITE_ORIGIN),
-      extracted:  extractFromHtml(html, SITE_ORIGIN),
-      html_start: html.slice(0, 2000),
-      html_end:   html.slice(-500),
+      direct:     extractDirectFromHtml(html, SITE_ORIGIN, workerUrl),
+      html_start: html.slice(0, 3000),
     });
   } catch (err) {
     return jsonResponse({ error: err.message, url: pageUrl }, 502);
   }
 }
 
-// ─── Extrator principal ───────────────────────────────────────────────────────
+// ─── Proxy de vídeo ───────────────────────────────────────────────────────────
 
-async function handleExtract(params) {
-  const pageUrl = params.get("url");
-  if (!pageUrl) return jsonResponse({ success: false, error: "Missing ?url=" }, 400);
+async function handleProxy(target, request) {
+  const headers = {
+    "User-Agent": UA,
+    "Referer":    SITE_REFERER,
+    "Origin":     SITE_ORIGIN,
+  };
+  const range = request.headers.get("Range");
+  if (range) headers["Range"] = range;
 
-  try {
-    const result = await extractVideo(pageUrl);
-    if (result) return jsonResponse({ success: true, ...result, source: pageUrl });
-    return jsonResponse({ success: false, error: "Video not found", source: pageUrl }, 404);
-  } catch (err) {
-    return jsonResponse({ success: false, error: err.message, source: pageUrl }, 502);
-  }
+  const res        = await fetch(target, { headers });
+  const resHeaders = new Headers(res.headers);
+  Object.entries(CORS_HEADERS).forEach(([k, v]) => resHeaders.set(k, v));
+  resHeaders.delete("Content-Security-Policy");
+  resHeaders.delete("X-Frame-Options");
+  return new Response(res.body, { status: res.status, headers: resHeaders });
 }
 
-async function extractVideo(pageUrl) {
-  const html = await fetchPage(pageUrl);
-
-  // 1. Direto no HTML
-  const direct = extractFromHtml(html, SITE_ORIGIN);
-  if (direct) return direct;
-
-  // 2. DooPlay AJAX
-  const dooplay = await tryDooplayAjax(html, pageUrl);
-  if (dooplay) return dooplay;
-
-  // 3. Iframe
-  const iframeUrl = extractIframe(html, SITE_ORIGIN);
-  if (iframeUrl && iframeUrl !== pageUrl) {
-    const iHtml = await fetchPage(iframeUrl, pageUrl);
-    const fromI = extractFromHtml(iHtml, iframeUrl);
-    if (fromI) return fromI;
-
-    // Iframe dentro do iframe
-    const iframeUrl2 = extractIframe(iHtml, iframeUrl);
-    if (iframeUrl2 && iframeUrl2 !== iframeUrl) {
-      const iHtml2 = await fetchPage(iframeUrl2, iframeUrl);
-      const fromI2 = extractFromHtml(iHtml2, iframeUrl2);
-      if (fromI2) return fromI2;
-    }
-  }
-
-  return null;
-}
-
-// ─── DooPlay AJAX ─────────────────────────────────────────────────────────────
-
-async function tryDooplayAjax(html, referer) {
-  const ajaxUrl = extractAjaxUrl(html);
-  const postId  = extractPostId(html);
-  const nonce   = extractNonce(html);
-  if (!ajaxUrl || !postId || !nonce) return null;
-
-  for (const action of ["dooplay_ajax_player", "dooplay_player_ajax", "TWP", "doo_player_ajax"]) {
-    try {
-      const body = new URLSearchParams({ action, postID: postId, nonce });
-      const res  = await fetch(ajaxUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type":     "application/x-www-form-urlencoded; charset=UTF-8",
-          "User-Agent":       UA,
-          "Accept":           "application/json, */*; q=0.01",
-          "X-Requested-With": "XMLHttpRequest",
-          "Referer":          referer,
-          "Origin":           SITE_ORIGIN,
-        },
-        body: body.toString(),
-      });
-      const text = await res.text();
-      if (!text || text === "0" || text === "-1") continue;
-
-      let embedHtml = text;
-      try { const d = JSON.parse(text); embedHtml = d.embed || d.data || d.html || d.result || text; } catch {}
-
-      const result = extractFromHtml(embedHtml, SITE_ORIGIN);
-      if (result) return result;
-
-      const iUrl = extractIframe(embedHtml, SITE_ORIGIN);
-      if (iUrl) {
-        const iH = await fetchPage(iUrl, referer);
-        const r  = extractFromHtml(iH, iUrl);
-        if (r) return r;
-      }
-    } catch {}
-  }
-  return null;
-}
-
-// ─── Extração HTML ────────────────────────────────────────────────────────────
-
-function extractFromHtml(html, base) {
-  const s = html.match(/<source[^>]+src=["']([^"']+\.mp4[^"']*)/i);
-  if (s) return { url: dec(s[1]), type: "mp4" };
-  const f = html.match(/["\s,({]file\s*:\s*["']([^"']+\.mp4[^"']*)/i);
-  if (f) return { url: dec(f[1]), type: "mp4" };
-  const j = html.match(/"(?:src|file|url)"\s*:\s*"([^"]+\.mp4[^"]*)"/i);
-  if (j) return { url: dec(j[1]), type: "mp4" };
-  const p = html.match(/(?:player|playerjs)\.(?:setup|init)\s*\(\s*\{[^}]*?file\s*:\s*["']([^"']+)/i);
-  if (p) return { url: dec(p[1]), type: "mp4" };
-  const b = html.match(/atob\s*\(\s*["']([A-Za-z0-9+/=]{20,})["']\s*\)/);
-  if (b) {
-    try {
-      const d = atob(b[1]);
-      const m = d.match(/https?:\/\/[^\s"'<>]+\.mp4[^\s"'<>]*/i);
-      if (m) return { url: m[0], type: "mp4" };
-      const h = d.match(/https?:\/\/[^\s"'<>]+\.m3u8[^\s"'<>]*/i);
-      if (h) return { url: h[0], type: "hls" };
-    } catch {}
-  }
-  const h = html.match(/["'](https?:\/\/[^"'<>\s]+\.m3u8[^"'<>\s]*)["']/i);
-  if (h) return { url: h[1], type: "hls" };
-  const any = html.match(/https?:\/\/[^\s"'<>]+\.mp4[^\s"'<>]*/i);
-  if (any) return { url: any[0], type: "mp4" };
-  return null;
-}
+// ─── Helpers HTML ─────────────────────────────────────────────────────────────
 
 function extractIframe(html, base) {
   const m = html.match(/<iframe[^>]+src=["']([^"']+)["']/i);
@@ -197,25 +260,7 @@ function extractNonce(html) {
   return m ? m[1] : null;
 }
 
-// ─── Proxy ────────────────────────────────────────────────────────────────────
-
-async function handleProxy(params, request) {
-  const target = params.get("url");
-  if (!target) return new Response("Missing url", { status: 400 });
-
-  const headers = { "User-Agent": UA, "Referer": SITE_REFERER, "Origin": SITE_ORIGIN };
-  const range   = request.headers.get("Range");
-  if (range) headers["Range"] = range;
-
-  const res = await fetch(target, { headers });
-  const resHeaders = new Headers(res.headers);
-  Object.entries(CORS_HEADERS).forEach(([k, v]) => resHeaders.set(k, v));
-  resHeaders.delete("Content-Security-Policy");
-  resHeaders.delete("X-Frame-Options");
-  return new Response(res.body, { status: res.status, headers: resHeaders });
-}
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// ─── Helpers gerais ───────────────────────────────────────────────────────────
 
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
@@ -244,7 +289,7 @@ async function fetchPage(url, referer = SITE_REFERER) {
 }
 
 function dec(s) {
-  return s.replace(/&amp;/g, "&").replace(/&#038;/g, "&").replace(/\\u0026/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">");
+  return s.replace(/&amp;/g, "&").replace(/&#038;/g, "&").replace(/\\u0026/g, "&");
 }
 
 function jsonResponse(data, status = 200) {
