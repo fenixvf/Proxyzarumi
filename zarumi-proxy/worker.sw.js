@@ -116,7 +116,9 @@ async function handleVideo(params) {
 // ─── Extratores ───────────────────────────────────────────────────────────────
 
 async function extractViaWorker(extractorBase, sourceUrl) {
-  const res = await fetch(`${extractorBase}/?url=${encodeURIComponent(sourceUrl)}`, {
+  // zarumi-drivea usa ?scrape=, zarumi-aq usa ?url=
+  const param = extractorBase.includes("zarumi-drivea") ? "scrape" : "url";
+  const res = await fetch(`${extractorBase}/?${param}=${encodeURIComponent(sourceUrl)}`, {
     headers: { "User-Agent": "Mozilla/5.0" },
   });
 

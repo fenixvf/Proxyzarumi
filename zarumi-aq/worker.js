@@ -3,32 +3,29 @@
  * Cloudflare Worker
  *
  * GET /?url=https://animeq.net/episodio/SLUG-episodio-01
+ * GET /?url=https://animeq.net/filme/SLUG/
  * Retorna JSON: { success, url, type, source }
  *
- * GET /proxy?url=https://...  → faz proxy transparente do conteúdo
- *
- * Idêntico ao zarumi-drivea, com referer/origin do animeq.net
+ * GET /proxy?url=https://... → proxy transparente
  */
 
 const SITE_ORIGIN  = "https://animeq.net";
 const SITE_REFERER = "https://animeq.net/";
 
 const CORS_HEADERS = {
-  "Access-Control-Allow-Origin":  "*",
-  "Access-Control-Allow-Methods": "GET, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
+  "Access-Control-Allow-Origin":   "*",
+  "Access-Control-Allow-Methods":  "GET, HEAD, OPTIONS",
+  "Access-Control-Allow-Headers":  "Content-Type, Range",
+  "Access-Control-Expose-Headers": "Content-Length, Content-Range, Accept-Ranges",
 };
 
 export default {
   async fetch(request) {
-    if (request.method === "OPTIONS") {
+    if (request.method === "OPTIONS")
       return new Response(null, { status: 204, headers: CORS_HEADERS });
-    }
 
     const url  = new URL(request.url);
-    const path = url.pathname;
-
-    if (path === "/proxy") return handleProxy(url.searchParams);
+    if (url.pathname === "/proxy") return handleProxy(url.searchParams, request);
     return handleExtract(url.searchParams);
   },
 };
@@ -37,7 +34,7 @@ export default {
 
 async function handleExtract(params) {
   const pageUrl = params.get("url");
-  if (!pageUrl) return jsonResponse({ success: false, error: "Missing url" }, 400);
+  if (!pageUrl) return jsonResponse({ success: false, error: "Missing ?url=" }, 400);
 
   try {
     const result = await extractVideo(pageUrl);
@@ -49,9 +46,9 @@ async function handleExtract(params) {
 }
 
 async function extractVideo(pageUrl) {
-  const html = await fetchPage(pageUrl, SITE_REFERER);
+  const html = await fetchPage(pageUrl);
 
-  // 1. Direto do HTML
+  // 1. Direto no HTML
   const direct = extractFromHtml(html, SITE_ORIGIN);
   if (direct) return direct;
 
@@ -59,12 +56,20 @@ async function extractVideo(pageUrl) {
   const dooplay = await tryDooplayAjax(html, pageUrl);
   if (dooplay) return dooplay;
 
-  // 3. Segue iframes
+  // 3. Iframe
   const iframeUrl = extractIframe(html, SITE_ORIGIN);
-  if (iframeUrl) {
-    const iframeHtml = await fetchPage(iframeUrl, pageUrl);
-    const fromIframe = extractFromHtml(iframeHtml, iframeUrl);
-    if (fromIframe) return fromIframe;
+  if (iframeUrl && iframeUrl !== pageUrl) {
+    const iHtml = await fetchPage(iframeUrl, pageUrl);
+    const fromI = extractFromHtml(iHtml, iframeUrl);
+    if (fromI) return fromI;
+
+    // Iframe dentro do iframe
+    const iframeUrl2 = extractIframe(iHtml, iframeUrl);
+    if (iframeUrl2 && iframeUrl2 !== iframeUrl) {
+      const iHtml2 = await fetchPage(iframeUrl2, iframeUrl);
+      const fromI2 = extractFromHtml(iHtml2, iframeUrl2);
+      if (fromI2) return fromI2;
+    }
   }
 
   return null;
@@ -76,102 +81,82 @@ async function tryDooplayAjax(html, referer) {
   const ajaxUrl = extractAjaxUrl(html);
   const postId  = extractPostId(html);
   const nonce   = extractNonce(html);
-
   if (!ajaxUrl || !postId || !nonce) return null;
 
-  const actions = ["dooplay_ajax_player", "dooplay_player_ajax", "TWP", "doo_player_ajax"];
-
-  for (const action of actions) {
+  for (const action of ["dooplay_ajax_player", "dooplay_player_ajax", "TWP", "doo_player_ajax"]) {
     try {
       const body = new URLSearchParams({ action, postID: postId, nonce });
-
-      const res = await fetch(ajaxUrl, {
+      const res  = await fetch(ajaxUrl, {
         method: "POST",
         headers: {
           "Content-Type":     "application/x-www-form-urlencoded; charset=UTF-8",
           "User-Agent":       UA,
-          "Accept":           "application/json, text/javascript, */*; q=0.01",
+          "Accept":           "application/json, */*; q=0.01",
           "X-Requested-With": "XMLHttpRequest",
           "Referer":          referer,
           "Origin":           SITE_ORIGIN,
         },
         body: body.toString(),
       });
-
       const text = await res.text();
       if (!text || text === "0" || text === "-1") continue;
 
       let embedHtml = text;
-      try {
-        const data = JSON.parse(text);
-        embedHtml = data.embed || data.data || data.html || data.result || text;
-      } catch {}
+      try { const d = JSON.parse(text); embedHtml = d.embed || d.data || d.html || d.result || text; } catch {}
 
-      if (typeof embedHtml === "string") {
-        const result = extractFromHtml(embedHtml, SITE_ORIGIN);
-        if (result) return result;
+      const result = extractFromHtml(embedHtml, SITE_ORIGIN);
+      if (result) return result;
 
-        const embedIframe = extractIframe(embedHtml, SITE_ORIGIN);
-        if (embedIframe) {
-          const iHtml = await fetchPage(embedIframe, referer);
-          const fromI = extractFromHtml(iHtml, embedIframe);
-          if (fromI) return fromI;
-        }
+      const iUrl = extractIframe(embedHtml, SITE_ORIGIN);
+      if (iUrl) {
+        const iH = await fetchPage(iUrl, referer);
+        const r  = extractFromHtml(iH, iUrl);
+        if (r) return r;
       }
     } catch {}
   }
-
   return null;
 }
 
 // ─── Extração HTML ────────────────────────────────────────────────────────────
 
 function extractFromHtml(html, base) {
-  const sourceTag = html.match(/<source[^>]+src=["']([^"']+\.mp4[^"']*)/i);
-  if (sourceTag) return { url: decodeEntities(sourceTag[1]), type: "mp4" };
-
-  const fileAttr = html.match(/["\s]file\s*:\s*["']([^"']+\.mp4[^"']*)/i);
-  if (fileAttr) return { url: decodeEntities(fileAttr[1]), type: "mp4" };
-
-  const jsonSrc = html.match(/"src"\s*:\s*"([^"]+\.mp4[^"]*)"/i);
-  if (jsonSrc) return { url: decodeEntities(jsonSrc[1]), type: "mp4" };
-
-  const setup = html.match(/(?:player|playerjs)\.(?:setup|init)\s*\(\s*\{[^}]*?file\s*:\s*["']([^"']+)/i);
-  if (setup) return { url: decodeEntities(setup[1]), type: "mp4" };
-
-  const b64 = html.match(/atob\s*\(\s*["']([A-Za-z0-9+/=]{20,})["']\s*\)/);
-  if (b64) {
+  const s = html.match(/<source[^>]+src=["']([^"']+\.mp4[^"']*)/i);
+  if (s) return { url: dec(s[1]), type: "mp4" };
+  const f = html.match(/["\s,({]file\s*:\s*["']([^"']+\.mp4[^"']*)/i);
+  if (f) return { url: dec(f[1]), type: "mp4" };
+  const j = html.match(/"(?:src|file|url)"\s*:\s*"([^"]+\.mp4[^"]*)"/i);
+  if (j) return { url: dec(j[1]), type: "mp4" };
+  const p = html.match(/(?:player|playerjs)\.(?:setup|init)\s*\(\s*\{[^}]*?file\s*:\s*["']([^"']+)/i);
+  if (p) return { url: dec(p[1]), type: "mp4" };
+  const b = html.match(/atob\s*\(\s*["']([A-Za-z0-9+/=]{20,})["']\s*\)/);
+  if (b) {
     try {
-      const decoded = atob(b64[1]);
-      const mp4 = decoded.match(/https?:\/\/[^\s"'<>]+\.mp4[^\s"'<>]*/i);
-      if (mp4) return { url: mp4[0], type: "mp4" };
-      const m3u8 = decoded.match(/https?:\/\/[^\s"'<>]+\.m3u8[^\s"'<>]*/i);
-      if (m3u8) return { url: m3u8[0], type: "hls" };
+      const d = atob(b[1]);
+      const m = d.match(/https?:\/\/[^\s"'<>]+\.mp4[^\s"'<>]*/i);
+      if (m) return { url: m[0], type: "mp4" };
+      const h = d.match(/https?:\/\/[^\s"'<>]+\.m3u8[^\s"'<>]*/i);
+      if (h) return { url: h[0], type: "hls" };
     } catch {}
   }
-
-  const m3u8 = html.match(/["'](https?:\/\/[^"'<>\s]+\.m3u8[^"'<>\s]*)["']/i);
-  if (m3u8) return { url: m3u8[1], type: "hls" };
-
-  const anyMp4 = html.match(/https?:\/\/[^\s"'<>]+\.mp4[^\s"'<>]*/i);
-  if (anyMp4) return { url: anyMp4[0], type: "mp4" };
-
+  const h = html.match(/["'](https?:\/\/[^"'<>\s]+\.m3u8[^"'<>\s]*)["']/i);
+  if (h) return { url: h[1], type: "hls" };
+  const any = html.match(/https?:\/\/[^\s"'<>]+\.mp4[^\s"'<>]*/i);
+  if (any) return { url: any[0], type: "mp4" };
   return null;
 }
 
 function extractIframe(html, base) {
   const m = html.match(/<iframe[^>]+src=["']([^"']+)["']/i);
   if (!m) return null;
-  const src = m[1];
-  if (src.startsWith("http")) return src;
-  if (src.startsWith("//")) return "https:" + src;
-  return base + src;
+  const s = m[1];
+  return s.startsWith("http") ? s : s.startsWith("//") ? "https:" + s : base + s;
 }
 
 function extractAjaxUrl(html) {
   const m = html.match(/["']ajaxurl["']\s*:\s*["']([^"']+)["']/i)
          || html.match(/var\s+ajaxurl\s*=\s*["']([^"']+)["']/i);
-  return m ? decodeEntities(m[1]) : null;
+  return m ? dec(m[1]) : null;
 }
 
 function extractPostId(html) {
@@ -189,24 +174,20 @@ function extractNonce(html) {
 
 // ─── Proxy ────────────────────────────────────────────────────────────────────
 
-async function handleProxy(params) {
+async function handleProxy(params, request) {
   const target = params.get("url");
   if (!target) return new Response("Missing url", { status: 400 });
 
-  const res = await fetch(target, {
-    headers: {
-      "User-Agent": UA,
-      "Referer":    SITE_REFERER,
-      "Origin":     SITE_ORIGIN,
-    },
-  });
+  const headers = { "User-Agent": UA, "Referer": SITE_REFERER, "Origin": SITE_ORIGIN };
+  const range   = request.headers.get("Range");
+  if (range) headers["Range"] = range;
 
-  const headers = new Headers(res.headers);
-  Object.entries(CORS_HEADERS).forEach(([k, v]) => headers.set(k, v));
-  headers.delete("Content-Security-Policy");
-  headers.delete("X-Frame-Options");
-
-  return new Response(res.body, { status: res.status, headers });
+  const res = await fetch(target, { headers });
+  const resHeaders = new Headers(res.headers);
+  Object.entries(CORS_HEADERS).forEach(([k, v]) => resHeaders.set(k, v));
+  resHeaders.delete("Content-Security-Policy");
+  resHeaders.delete("X-Frame-Options");
+  return new Response(res.body, { status: res.status, headers: resHeaders });
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -219,12 +200,10 @@ async function fetchPage(url, referer = SITE_REFERER) {
       "User-Agent":                UA,
       "Accept":                    "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
       "Accept-Language":           "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
-      "Accept-Encoding":           "gzip, deflate, br",
       "Referer":                   referer,
       "Origin":                    SITE_ORIGIN,
       "Upgrade-Insecure-Requests": "1",
       "Cache-Control":             "max-age=0",
-      "Connection":                "keep-alive",
       "sec-ch-ua":                 '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
       "sec-ch-ua-mobile":          "?0",
       "sec-ch-ua-platform":        '"Windows"',
@@ -232,25 +211,15 @@ async function fetchPage(url, referer = SITE_REFERER) {
       "sec-fetch-mode":            "navigate",
       "sec-fetch-site":            "same-origin",
       "sec-fetch-user":            "?1",
-      "DNT":                       "1",
     },
     redirect: "follow",
   });
   if (!res.ok) throw new Error(`HTTP ${res.status} → ${url}`);
-  const text = await res.text();
-  if (text.includes("error code:") || text.includes("Checking your browser") || text.includes("cf-browser-verification")) {
-    throw new Error(`Cloudflare bloqueou: ${text.slice(0, 100)}`);
-  }
-  return text;
+  return res.text();
 }
 
-function decodeEntities(str) {
-  return str
-    .replace(/&amp;/g, "&")
-    .replace(/&#038;/g, "&")
-    .replace(/\\u0026/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">");
+function dec(s) {
+  return s.replace(/&amp;/g, "&").replace(/&#038;/g, "&").replace(/\\u0026/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">");
 }
 
 function jsonResponse(data, status = 200) {
