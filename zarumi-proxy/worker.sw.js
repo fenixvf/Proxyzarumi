@@ -1,9 +1,11 @@
 /**
  * Zarumi Proxy Worker — Service Worker format
  * Usa extratores próprios como backend:
- *   AnimeQ      → zarumi-aq.zarumi.workers.dev
- *   AniTube     → zarumi-at.zarumi.workers.dev (retorna HLS)
- *   AnimésDrive → zarumi-drivea.zarumi.workers.dev
+ *   animeplay.cloud  → zarumi-aq.zarumi.workers.dev (DooPlay, admin_ajax)
+ *   animesonline.cloud → zarumi-aq.zarumi.workers.dev (DooPlay, wp_json)
+ *   AnimeQ           → zarumi-aq.zarumi.workers.dev (DooPlay, wp_json)
+ *   AniTube          → zarumi-at.zarumi.workers.dev (HLS via override)
+ *   AnimésDrive      → BLOQUEADO por Cloudflare Bot Management (removido)
  */
 
 const ALLOWED_ORIGINS = [
@@ -15,15 +17,24 @@ const ALLOWED_ORIGINS = [
 const CACHE_TTL    = 60 * 60 * 6;
 const OVERRIDE_TTL = 60 * 60 * 24 * 30;
 
+// Fontes em ordem de prioridade (zarumi-aq é genérico para qualquer site DooPlay)
 const SOURCES = [
   {
-    name:      "animesdrive",
-    base:      "https://animesdrive.online/episodio",
-    extractor: "https://zarumi-drivea.zarumi.workers.dev",
+    name:      "animeplay",
+    base:      "https://animeplay.cloud/episodio",
+    baseFilme: "https://animeplay.cloud/filme",
+    extractor: "https://zarumi-aq.zarumi.workers.dev",
+  },
+  {
+    name:      "animesonline",
+    base:      "https://animesonline.cloud/episodio",
+    baseFilme: "https://animesonline.cloud/filme",
+    extractor: "https://zarumi-aq.zarumi.workers.dev",
   },
   {
     name:      "animeq",
     base:      "https://animeq.net/episodio",
+    baseFilme: "https://animeq.net/filme",
     extractor: "https://zarumi-aq.zarumi.workers.dev",
   },
 ];
@@ -84,16 +95,20 @@ async function handleVideo(params) {
   }
 
   // 3. Fontes automáticas
+  const isMovie  = type === "movie";
   const variants = buildSlugVariants(slug, ep, type, dub);
   const errors   = [];
 
   for (const source of SOURCES) {
+    // Escolhe base correta para filmes vs episódios
+    const baseUrl = isMovie
+      ? (source.baseFilme || source.base.replace("/episodio", "/filme"))
+      : source.base;
+
     for (const { path: slugPath, label } of variants) {
-      const sourceUrl = `${source.base}/${slugPath}`;
+      const sourceUrl = `${baseUrl}/${slugPath}`;
       try {
-        const videoUrl = source.extractor
-          ? await extractViaWorker(source.extractor, sourceUrl)
-          : await extractFromPage(sourceUrl);
+        const videoUrl = await extractViaWorker(source.extractor, sourceUrl);
 
         if (videoUrl) {
           const result = { url: videoUrl, source: sourceUrl, provider: source.name, label };
@@ -116,9 +131,8 @@ async function handleVideo(params) {
 // ─── Extratores ───────────────────────────────────────────────────────────────
 
 async function extractViaWorker(extractorBase, sourceUrl) {
-  // zarumi-drivea usa ?scrape=, zarumi-aq usa ?url=
-  const param = extractorBase.includes("zarumi-drivea") ? "scrape" : "url";
-  const res = await fetch(`${extractorBase}/?${param}=${encodeURIComponent(sourceUrl)}`, {
+  // zarumi-aq (e todo extrator DooPlay) usa ?url=
+  const res = await fetch(`${extractorBase}/?url=${encodeURIComponent(sourceUrl)}`, {
     headers: { "User-Agent": "Mozilla/5.0" },
   });
 
@@ -126,12 +140,12 @@ async function extractViaWorker(extractorBase, sourceUrl) {
 
   const text = await res.text();
 
-  // Resposta HLS (m3u8) — AniTube
+  // Resposta HLS (#EXTM3U) — AniTube
   if (text.startsWith("#EXTM3U")) {
     return `${extractorBase}/?url=${encodeURIComponent(sourceUrl)}`;
   }
 
-  // Resposta JSON — AnimésDrive / AnimeQ
+  // Resposta JSON — zarumi-aq
   try {
     const data = JSON.parse(text);
     if (!data.success) return null;
@@ -141,9 +155,9 @@ async function extractViaWorker(extractorBase, sourceUrl) {
       const mp4 = data.results.find(r => r.type === "mp4");
       if (mp4) return mp4.proxyUrl || mp4.url;
 
-      // Fallback: iframe proxiado
-      const iframe = data.results.find(r => r.type === "iframe" && r.proxyUrl);
-      if (iframe) return iframe.proxyUrl;
+      // Fallback: hls
+      const hls = data.results.find(r => r.type === "hls");
+      if (hls) return hls.proxyUrl || hls.url;
 
       // Qualquer resultado com URL
       const any = data.results.find(r => r.proxyUrl || r.url);
@@ -156,39 +170,6 @@ async function extractViaWorker(extractorBase, sourceUrl) {
   // URL mp4 direta no texto
   const mp4Match = text.match(/https?:\/\/[^\s"'<>]+\.mp4[^\s"'<>]*/i);
   if (mp4Match) return mp4Match[0];
-
-  return null;
-}
-
-async function extractFromPage(pageUrl) {
-  const html = await fetchPage(pageUrl);
-  return extractFromHtml(html, pageUrl);
-}
-
-function extractFromHtml(html, baseUrl) {
-  const sourceTag = html.match(/<source[^>]+src=["']([^"']+\.mp4[^"']*)/i);
-  if (sourceTag) return decodeHtmlEntities(sourceTag[1]);
-
-  const fileAttr = html.match(/file\s*:\s*["']([^"']+\.mp4[^"']*)/i);
-  if (fileAttr) return decodeHtmlEntities(fileAttr[1]);
-
-  const jsonSrc = html.match(/"src"\s*:\s*"([^"]+\.mp4[^"]*)"/i);
-  if (jsonSrc) return decodeHtmlEntities(jsonSrc[1]);
-
-  const playerInit = html.match(/player\.init\s*\(\s*\{[^}]*file\s*:\s*["']([^"']+)/i);
-  if (playerInit) return decodeHtmlEntities(playerInit[1]);
-
-  const b64 = html.match(/atob\s*\(\s*["']([A-Za-z0-9+/=]{20,})["']\s*\)/);
-  if (b64) {
-    try {
-      const decoded = atob(b64[1]);
-      const mp4 = decoded.match(/https?:\/\/[^\s"'<>]+\.mp4[^\s"'<>]*/i);
-      if (mp4) return mp4[0];
-    } catch {}
-  }
-
-  const anyMp4 = html.match(/https?:\/\/[^\s"'<>]+\.mp4[^\s"'<>]*/i);
-  if (anyMp4) return anyMp4[0];
 
   return null;
 }
@@ -292,31 +273,20 @@ async function handleDebug(params) {
   const pageUrl = params.get("url");
   if (!pageUrl) return corsResponse(JSON.stringify({ error: "Missing url" }), 400);
 
-  const source = SOURCES.find(s => pageUrl.includes(new URL(s.base).hostname));
-
-  if (source?.extractor) {
-    try {
-      const res  = await fetch(`${source.extractor}/?url=${encodeURIComponent(pageUrl)}`);
-      const text = await res.text();
-      return corsResponse(JSON.stringify({
-        url: pageUrl,
-        extractor: source.extractor,
-        status: res.status,
-        response: text.slice(0, 3000),
-      }, null, 2), 200);
-    } catch (err) {
-      return corsResponse(JSON.stringify({ error: err.message }), 502);
-    }
-  }
+  // Encontra extrator pelo hostname da URL
+  const source = SOURCES.find(s => {
+    try { return pageUrl.includes(new URL(s.base).hostname); } catch { return false; }
+  });
+  const extractor = source?.extractor || "https://zarumi-aq.zarumi.workers.dev";
 
   try {
-    const html = await fetchPage(pageUrl);
+    const res  = await fetch(`${extractor}/?url=${encodeURIComponent(pageUrl)}`);
+    const text = await res.text();
     return corsResponse(JSON.stringify({
-      url: pageUrl,
-      html_length: html.length,
-      extracted: extractFromHtml(html, pageUrl),
-      html_start: html.slice(0, 2000),
-      html_end:   html.slice(-1000),
+      url:       pageUrl,
+      extractor,
+      status:    res.status,
+      response:  text.slice(0, 3000),
     }, null, 2), 200);
   } catch (err) {
     return corsResponse(JSON.stringify({ error: err.message }), 502);
@@ -326,17 +296,20 @@ async function handleDebug(params) {
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function buildSlugVariants(slug, ep, type, dub) {
-  if (type !== "serie") {
+  if (type === "movie") {
+    // Filmes — sem sufixo de episódio
+    const dubSuffix = dub ? "-dublado" : "";
     return [
-      { label: "padrao",    path: slug },
-      { label: "com-filme", path: `${slug}-filme` },
-      { label: "com-ova",   path: `${slug}-ova` },
+      { label: "padrao",      path: `${slug}${dubSuffix}` },
+      { label: "sem-dub",     path: slug },
+      { label: "com-filme",   path: `${slug}${dubSuffix}-filme` },
+      { label: "com-the",     path: `o-${slug}${dubSuffix}` },
     ];
   }
 
   const dubSuffix = dub ? "-dublado" : "";
-  const ep2d = String(ep).padStart(2, "0");
-  const ep1d = String(ep);
+  const ep2d      = ep != null ? String(ep).padStart(2, "0") : "01";
+  const ep1d      = ep != null ? String(ep) : "1";
 
   return [
     { label: "padrao",   path: `${slug}${dubSuffix}-episodio-${ep2d}` },
@@ -353,30 +326,6 @@ function toSlug(title) {
     .replace(/[^a-z0-9\s-]/g, "")
     .trim()
     .replace(/\s+/g, "-");
-}
-
-async function fetchPage(url) {
-  const res = await fetch(url, {
-    headers: {
-      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-      "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8",
-      "Referer": "https://animesdrive.online/",
-    },
-    redirect: "follow",
-  });
-
-  if (!res.ok) throw new Error(`HTTP ${res.status} → ${url}`);
-  return res.text();
-}
-
-function decodeHtmlEntities(str) {
-  return str
-    .replace(/&amp;/g, "&")
-    .replace(/&#038;/g, "&")
-    .replace(/\\u0026/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">");
 }
 
 async function kvGet(key) {
