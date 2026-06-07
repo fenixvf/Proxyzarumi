@@ -199,29 +199,36 @@ async function handleDebugAjax(params) {
   const ajaxUrl = `${origin}/wp-admin/admin-ajax.php`;
   const results = [];
 
-  for (const action of ["dooplay_ajax_player", "dooplay_player_ajax"]) {
-    const body = new URLSearchParams({
-      action,
-      post_id: postId,
-      nump,
-      ...(nonce ? { _nonce: nonce } : {}),
-    });
+  const nonceKeys  = ["_nonce", "nonce", "security", "_wpnonce"];
+  const nonceValues = params.get("nonce2")
+    ? [nonce, params.get("nonce2")]
+    : [nonce];
 
-    try {
-      const res = await fetch(ajaxUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-          "Referer": origin,
-          "X-Requested-With": "XMLHttpRequest",
-        },
-        body: body.toString(),
-      });
-      const text = await res.text();
-      results.push({ action, status: res.status, response: text.slice(0, 2000) });
-    } catch (err) {
-      results.push({ action, error: err.message });
+  for (const action of ["dooplay_ajax_player", "dooplay_player_ajax"]) {
+    for (const nonceKey of nonceKeys) {
+      for (const nonceVal of nonceValues) {
+        const bodyParams = { action, post_id: postId, nump };
+        if (nonceVal) bodyParams[nonceKey] = nonceVal;
+
+        const body = new URLSearchParams(bodyParams);
+        try {
+          const res = await fetch(ajaxUrl, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/x-www-form-urlencoded",
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+              "Referer": origin,
+              "X-Requested-With": "XMLHttpRequest",
+            },
+            body: body.toString(),
+          });
+          const text = await res.text();
+          results.push({ action, nonceKey, nonceVal, status: res.status, response: text.slice(0, 500) });
+          if (res.ok && text !== "0" && text !== "-1" && text.length > 2) break;
+        } catch (err) {
+          results.push({ action, nonceKey, error: err.message });
+        }
+      }
     }
   }
 
