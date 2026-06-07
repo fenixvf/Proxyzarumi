@@ -4,7 +4,7 @@ compatibility_date = "2024-01-01"
 
 [[kv_namespaces]]
 binding = "ZARUMI_CACHE"
-id = "COLE_O_ID_DO_KV_AQUI"
+id = "87d0ca269a7a4aaca189d471b3086bf9"
 
 [vars]
 ENVIRONMENT = "production"
