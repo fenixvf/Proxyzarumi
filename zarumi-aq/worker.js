@@ -30,9 +30,12 @@ export default {
     const pageUrl   = workerUrl.searchParams.get("url");
     const isDebug   = workerUrl.pathname === "/debug";
 
-    if (proxy)           return handleProxy(proxy, request);
-    if (pageUrl && isDebug) return handleDebug(pageUrl, workerUrl);
-    if (pageUrl)         return handleExtract(pageUrl, workerUrl);
+    const isAjaxDebug = workerUrl.pathname === "/ajax-debug";
+
+    if (proxy)                return handleProxy(proxy, request);
+    if (pageUrl && isAjaxDebug) return handleAjaxDebug(pageUrl, workerUrl);
+    if (pageUrl && isDebug)   return handleDebug(pageUrl, workerUrl);
+    if (pageUrl)              return handleExtract(pageUrl, workerUrl);
 
     return jsonResponse({ error: "Use ?url=PAGE_URL ou ?proxy=VIDEO_URL" }, 400);
   },
@@ -250,6 +253,64 @@ function extractDirectFromHtml(html, workerUrl) {
       results.push(buildResult(url, `Opção ${results.length + 1} (HLS)`, "hls", workerUrl));
 
   return results;
+}
+
+// ─── AJAX Debug ───────────────────────────────────────────────────────────────
+
+async function handleAjaxDebug(pageUrl, workerUrl) {
+  try {
+    const { html, cookies } = await fetchPageWithCookies(pageUrl);
+    const siteOrigin        = getSiteOrigin(pageUrl);
+    const postId            = extractPostId(html);
+    const nonce             = extractNonce(html);
+    const type              = extractDooplayType(html, pageUrl);
+    const cookieHeader      = buildCookieHeader(cookies);
+
+    const ajaxUrl = (() => {
+      const m = html.match(/["']ajaxurl["']\s*:\s*["']([^"']+)["']/i)
+             || html.match(/["']url["']\s*:\s*["']([^"']+admin-ajax[^"']+)["']/i);
+      const raw = dec(m?.[1] || "");
+      return raw ? (raw.startsWith("http") ? raw : `${siteOrigin}${raw}`)
+                 : `${siteOrigin}/wp-admin/admin-ajax.php`;
+    })();
+
+    const actions = ["dooplay_ajax_player", "dooplay_player_ajax", "doo_player_ajax", "TWP", "dooprime_ajax_player"];
+    const numes   = ["1", "2"];
+    const results = [];
+
+    for (const action of actions) {
+      for (const nume of numes) {
+        const body = new URLSearchParams({ action, postID: postId, type, nume, nonce });
+        const headers = {
+          "Content-Type":     "application/x-www-form-urlencoded; charset=UTF-8",
+          "User-Agent":       UA,
+          "Accept":           "application/json, text/javascript, */*; q=0.01",
+          "X-Requested-With": "XMLHttpRequest",
+          "Referer":          pageUrl,
+          "Origin":           siteOrigin,
+        };
+        if (cookieHeader) headers["Cookie"] = cookieHeader;
+
+        try {
+          const res  = await fetch(ajaxUrl, { method: "POST", headers, body: body.toString() });
+          const text = await res.text();
+          results.push({ action, nume, status: res.status, response: text.slice(0, 500) });
+          if (text && text !== "0" && text !== "-1" && text !== "false") break;
+        } catch (e) {
+          results.push({ action, nume, error: e.message });
+        }
+      }
+    }
+
+    return jsonResponse({
+      url: pageUrl, postId, nonce, type, ajaxUrl,
+      cookiesSent: cookieHeader?.split(";").map(c => c.split("=")[0].trim()),
+      cookiesRcvd: Object.keys(cookies),
+      results,
+    });
+  } catch (err) {
+    return jsonResponse({ error: err.message }, 502);
+  }
 }
 
 // ─── Debug ────────────────────────────────────────────────────────────────────
