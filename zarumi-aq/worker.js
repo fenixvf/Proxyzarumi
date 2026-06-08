@@ -274,39 +274,74 @@ async function handleAjaxDebug(pageUrl, workerUrl) {
                  : `${siteOrigin}/wp-admin/admin-ajax.php`;
     })();
 
+    // Extrai TODOS os nonces do HTML
+    const allNonces = [...html.matchAll(/["']nonce["']\s*:\s*["']([a-f0-9]{6,12})["']/gi)].map(m => m[1]);
+
     const actions = ["dooplay_ajax_player", "dooplay_player_ajax", "doo_player_ajax", "TWP", "dooprime_ajax_player"];
     const numes   = ["1", "2"];
     const results = [];
 
-    for (const action of actions) {
-      for (const nume of numes) {
-        const body = new URLSearchParams({ action, postID: postId, type, nume, nonce });
-        const headers = {
-          "Content-Type":     "application/x-www-form-urlencoded; charset=UTF-8",
-          "User-Agent":       UA,
-          "Accept":           "application/json, text/javascript, */*; q=0.01",
-          "X-Requested-With": "XMLHttpRequest",
-          "Referer":          pageUrl,
-          "Origin":           siteOrigin,
-        };
-        if (cookieHeader) headers["Cookie"] = cookieHeader;
+    // Testa com cada nonce encontrado no HTML
+    const noncesToTry = [...new Set([nonce, ...allNonces, "invalid_nonce_test"])].filter(Boolean);
 
+    for (const testNonce of noncesToTry) {
+      for (const action of actions) {
+        for (const nome of numes) {
+          // Tenta com 'nome', 'num' e 'nume'
+          for (const [paramKey, paramVal] of [["nume", nome], ["num", nome]]) {
+            const body = new URLSearchParams({ action, postID: postId, type, [paramKey]: paramVal, nonce: testNonce });
+            const headers = {
+              "Content-Type":     "application/x-www-form-urlencoded; charset=UTF-8",
+              "User-Agent":       UA,
+              "Accept":           "application/json, text/javascript, */*; q=0.01",
+              "X-Requested-With": "XMLHttpRequest",
+              "Referer":          pageUrl,
+              "Origin":           siteOrigin,
+            };
+            if (cookieHeader) headers["Cookie"] = cookieHeader;
+
+            try {
+              const res  = await fetch(ajaxUrl, { method: "POST", headers, body: body.toString() });
+              const text = await res.text();
+              const isMeaningful = text && text !== "0" && text !== "-1" && text !== "false" && !text.startsWith("<!DOCTYPE");
+              if (isMeaningful || testNonce === "invalid_nonce_test") {
+                results.push({ nonce: testNonce, action, [paramKey]: paramVal, status: res.status, response: text.slice(0, 800) });
+              }
+              if (isMeaningful) break;
+            } catch (e) {
+              results.push({ nonce: testNonce, action, [paramKey]: paramVal, error: e.message });
+            }
+          }
+          if (results.find(r => r.nonce === testNonce && r.action === action && r.response && r.response !== "0")) break;
+        }
+      }
+    }
+
+    // Também testa REST API
+    const playerApi = html.match(/"player_api"\s*:\s*"([^"]+)"/i)?.[1];
+    const restResults = [];
+    if (playerApi && postId && nonce) {
+      for (const source of ["1", "2"]) {
         try {
-          const res  = await fetch(ajaxUrl, { method: "POST", headers, body: body.toString() });
+          const apiUrl  = `${playerApi.replace(/\/$/, "")}/${postId}?type=${type}&source=${source}&nonce=${nonce}`;
+          const headers = { "User-Agent": UA, "Accept": "application/json", "Referer": pageUrl, "X-WP-Nonce": nonce };
+          if (cookieHeader) headers["Cookie"] = cookieHeader;
+          const res  = await fetch(apiUrl, { headers });
           const text = await res.text();
-          results.push({ action, nume, status: res.status, response: text.slice(0, 500) });
-          if (text && text !== "0" && text !== "-1" && text !== "false") break;
+          restResults.push({ source, status: res.status, response: text.slice(0, 500) });
         } catch (e) {
-          results.push({ action, nume, error: e.message });
+          restResults.push({ source, error: e.message });
         }
       }
     }
 
     return jsonResponse({
-      url: pageUrl, postId, nonce, type, ajaxUrl,
+      url: pageUrl, postId, nonce, all_nonces: allNonces, type, ajaxUrl,
+      player_api: playerApi || null,
       cookiesSent: cookieHeader?.split(";").map(c => c.split("=")[0].trim()),
       cookiesRcvd: Object.keys(cookies),
-      results,
+      ajax_results: results,
+      rest_results: restResults,
     });
   } catch (err) {
     return jsonResponse({ error: err.message }, 502);
@@ -319,19 +354,55 @@ async function handleDebug(pageUrl, workerUrl) {
   try {
     const { html, cookies } = await fetchPageWithCookies(pageUrl);
     const siteOrigin        = getSiteOrigin(pageUrl);
+
+    // Extrai TODOS os nonces do HTML completo
+    const allNonces = [...html.matchAll(/["']nonce["']\s*:\s*["']([a-f0-9]{6,12})["']/gi)].map(m => m[1]);
+
+    // Extrai contexto ao redor de cada nonce
+    const nonceCtx = allNonces.map(n => {
+      const idx = html.indexOf(n);
+      return { nonce: n, ctx: html.slice(Math.max(0, idx - 60), idx + 60) };
+    });
+
+    // Extrai action names do JS
+    const actions = [...html.matchAll(/action\s*[:=]\s*["']([a-z_]+ajax[^"']{0,30})["']/gi)].map(m => m[1]);
+
+    // Extrai player options (data-num, data-type, data-post)
+    const playerOpts = [...html.matchAll(/<[^>]+class=["'][^"']*dooplay_player_option[^"']*["'][^>]*>/gi)]
+      .map(m => m[0].slice(0, 200));
+
+    // Extrai player_options JSON (js variable)
+    const playerOptsJson = html.match(/player_options\s*[:=]\s*(\{[^}]{0,500}\})/i)?.[1] || null;
+
+    // Busca o dtAjax/gonza object completo
+    const dtAjax = html.match(/dtAjax\s*=\s*(\{[^;]{0,800})/i)?.[1] || null;
+    const dtGonza = html.match(/dtGonza\s*=\s*(\{[^;]{0,800})/i)?.[1] || null;
+
+    // Seção específica do player (provavelmente perto do fim do HTML)
+    const playerSection = (() => {
+      const idx = html.indexOf("dooplay_player");
+      return idx !== -1 ? html.slice(Math.max(0, idx - 100), idx + 600) : null;
+    })();
+
     return jsonResponse({
-      url:          pageUrl,
-      html_length:  html.length,
-      post_id:      extractPostId(html),
-      nonce:        extractNonce(html),
-      type:         extractDooplayType(html, pageUrl),
-      player_api:   html.match(/"player_api"\s*:\s*"([^"]+)"/i)?.[1] || null,
-      play_method:  html.match(/"play_method"\s*:\s*"([^"]+)"/i)?.[1] || null,
-      ajax_url:     html.match(/["']url["']\s*:\s*["']([^"']+admin-ajax[^"']+)["']/i)?.[1] || null,
-      cookies_rcvd: Object.keys(cookies),
-      iframes:      extractAllIframes(html, siteOrigin).slice(0, 5),
-      direct:       extractDirectFromHtml(html, workerUrl),
-      html_start:   html.slice(0, 2000),
+      url:            pageUrl,
+      html_length:    html.length,
+      post_id:        extractPostId(html),
+      all_nonces:     nonceCtx,
+      type:           extractDooplayType(html, pageUrl),
+      player_api:     html.match(/"player_api"\s*:\s*"([^"]+)"/i)?.[1] || null,
+      play_method:    html.match(/"play_method"\s*:\s*"([^"]+)"/i)?.[1] || null,
+      ajax_url:       html.match(/["']ajaxurl["']\s*:\s*["']([^"']+)["']/i)?.[1] || null,
+      action_names:   [...new Set(actions)].slice(0, 10),
+      player_options: playerOpts.slice(0, 5),
+      player_opts_js: playerOptsJson,
+      dt_ajax:        dtAjax?.slice(0, 400),
+      dt_gonza:       dtGonza?.slice(0, 400),
+      player_section: playerSection,
+      cookies_rcvd:   Object.keys(cookies),
+      iframes:        extractAllIframes(html, siteOrigin).slice(0, 5),
+      direct:         extractDirectFromHtml(html, workerUrl),
+      html_mid:       html.slice(20000, 25000),
     });
   } catch (err) {
     return jsonResponse({ error: err.message, url: pageUrl }, 502);
