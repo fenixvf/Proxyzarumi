@@ -1,0 +1,192 @@
+// services/drivea.js
+const DA = 'https://drivea.masterotaku487.workers.dev';
+const AD_BASE = 'https://animesdrive.online';
+
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Transformar URL para Dublado
+// Ex: .../Re-Zero-4/09.mp4  â†’  .../Re-Zero-4/Dub/09.mp4
+const toDubUrl = (url) => {
+  if (url.includes('/Dub/')) return url;
+  const i = url.lastIndexOf('/');
+  return url.slice(0, i) + '/Dub' + url.slice(i);
+};
+
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Helpers de Slug
+const slugifyAD = (s) =>
+  s.toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[:.!?â˜…â˜†â™ªâ€¢'"]/g, '')
+    .replace(/[^a-z0-9\s-]/g, ' ')
+    .trim().replace(/\s+/g, '-').replace(/-+/g, '-');
+
+const stripSeasonAD = (s) =>
+  s.replace(/\s+(the\s+)?(final|last|new)\s+season/gi, '')
+   .replace(/\s*[-â€“]\s*(season|parte?|part|cour)\s*\d+/gi, '')
+   .trim();
+
+const buildDriveACandidates = (anime, dub = false) => {
+  const titles = [
+    anime.title,
+    anime.title_english,
+    anime.title_portuguese,
+    ...(anime.titles || []).map(t => t.title)
+  ].filter(Boolean).filter((v, i, a) => a.indexOf(v) === i);
+
+  const bases = new Set();
+  for (const t of titles) {
+    const stripped = stripSeasonAD(t);
+    for (const v of [t, stripped]) {
+      const s = slugifyAD(v);
+      if (s && s.length > 1) bases.add(s);
+    }
+  }
+
+  if (dub) {
+    const withDub = [...bases].map(b => b + '-dublado');
+    return [...new Set([...withDub, ...bases])];
+  }
+  return [...bases];
+};
+
+const epStr = (ep) => String(ep).padStart(2, '0');
+
+const buildEpisodeUrl = (slug, ep, isMovie = false) =>
+  isMovie
+    ? `\( {AD_BASE}/episodio/ \){slug}`
+    : `\( {AD_BASE}/episodio/ \){slug}-episodio-${epStr(ep)}`;
+
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Testar se o episÃ³dio existe
+const probeDriveA = async (slug, ep, isMovie = false) => {
+  const epUrl = buildEpisodeUrl(slug, ep, isMovie);
+  const workerUrl = `\( {DA}/?url= \){encodeURIComponent(epUrl)}`;
+
+  try {
+    const res = await fetch(workerUrl, { signal: AbortSignal.timeout(20000) });
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (data.success && data.results?.length > 0) {
+      return { slug, results: data.results };
+    }
+  } catch (e) {}
+  return null;
+};
+
+// Resolver o slug correto testando vÃ¡rios candidatos
+const resolveDriveA = async (anime, ep, dub = false) => {
+  const isMovie = ['Movie', 'OVA', 'Special', 'TV Special', 'Music'].includes(anime.type);
+  const candidates = buildDriveACandidates(anime, dub);
+  
+  console.log('[DriveA] Testando slugs:', candidates);
+
+  for (const slug of candidates) {
+    const found = await probeDriveA(slug, ep, isMovie);
+    if (found) {
+      console.log('[DriveA] âœ… Encontrado:', slug);
+      return found;
+    }
+  }
+  throw new Error(`Anime "${anime.title}" nÃ£o encontrado no AnimesDrive`);
+};
+
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Escolher a melhor fonte de vÃ­deo
+const pickBestDriveASource = async (results) => {
+  // 1. MP4 direto (melhor)
+  const mp4s = results.filter(r => r.type === 'mp4' && r.proxyUrl);
+  if (mp4s.length > 0) {
+    return {
+      type: 'mp4',
+      sources: mp4s.map(r => ({
+        label: r.label || 'MP4',
+        url: r.proxyUrl,           // Proxy com suporte a Range
+        directUrl: r.url
+      }))
+    };
+  }
+
+  // 2. Blogger â†’ resolver para MP4
+  const bloggers = results.filter(r => r.isBlogger && r.resolveUrl);
+  for (const r of bloggers) {
+    try {
+      const res = await fetch(r.resolveUrl, { signal: AbortSignal.timeout(15000) });
+      const data = await res.json();
+      if (data.success && data.sources?.length > 0) {
+        return {
+          type: 'mp4',
+          sources: data.sources.map((s, i) => ({
+            label: `Blogger ${i + 1}`,
+            url: `\( {DA}/?proxy= \){encodeURIComponent(s.url)}`,
+            directUrl: s.url
+          }))
+        };
+      }
+    } catch {}
+  }
+
+  // 3. Iframe (embed)
+  const iframes = results.filter(r => r.type === 'iframe' && r.url);
+  if (iframes.length > 0) {
+    return {
+      type: 'iframe',
+      embedUrl: iframes[0].url,
+      sources: iframes.map((r, i) => ({
+        label: r.label || `OpÃ§Ã£o ${i + 1}`,
+        url: r.url
+      }))
+    };
+  }
+
+  throw new Error('Nenhuma fonte vÃ¡lida encontrada no DriveA');
+};
+
+export {
+  DA,
+  AD_BASE,
+  toDubUrl,
+  buildDriveACandidates,
+  resolveDriveA,
+  pickBestDriveASource,
+  probeDriveA
+};
+
+
+
+
+==========
+import { resolveDriveA, pickBestDriveASource, toDubUrl, DA } from '../services/drivea';
+
+const loadDriveA = async (anime, ep, isDub) => {
+  try {
+    const adResult = await resolveDriveA(anime, ep, isDub);
+    
+    const picked = await pickBestDriveASource(adResult.results);
+
+    if (picked.type === 'mp4') {
+      let sources = picked.sources;
+
+      // Aplica dublado se necessÃ¡rio
+      if (isDub) {
+        sources = sources.map(s => {
+          const dubUrl = toDubUrl(s.directUrl);
+          return {
+            ...s,
+            directUrl: dubUrl,
+            url: `\( {DA}/?proxy= \){encodeURIComponent(dubUrl)}`
+          };
+        });
+      }
+
+      // Use sources aqui no player
+      return { success: true, sources, type: 'mp4' };
+    }
+
+    if (picked.type === 'iframe') {
+      return { success: true, type: 'iframe', embedUrl: picked.embedUrl };
+    }
+  } catch (err) {
+    console.error('[DriveA] Erro:', err.message);
+    return { success: false, error: err.message };
+  }
+};
